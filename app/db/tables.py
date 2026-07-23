@@ -137,8 +137,9 @@ class ResourceTargetTable(Base):
     __table_args__ = (
         UniqueConstraint(
             "account_id",
+            "provider_scope_id",
             "provider_instance_id",
-            name="uq_resource_targets_account_provider_instance",
+            name="uq_resource_targets_account_scope_instance",
         ),
         UniqueConstraint(
             "target_id",
@@ -191,6 +192,11 @@ class ResourceTargetTable(Base):
             "account_id",
         ),
         Index(
+            "ix_resource_targets_account_scope",
+            "account_id",
+            "provider_scope_id",
+        ),
+        Index(
             "ix_resource_targets_candidate_state",
             "enabled",
             "ready",
@@ -215,8 +221,28 @@ class ResourceTargetTable(Base):
         String(255),
         nullable=False,
     )
+    provider_scope_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
     instance_name: Mapped[str | None] = mapped_column(
         String(255),
+        nullable=True,
+    )
+    provider_instance_state: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    provider_machine_type: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    private_ip: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    public_ip: Mapped[str | None] = mapped_column(
+        String(64),
         nullable=True,
     )
     region: Mapped[str] = mapped_column(

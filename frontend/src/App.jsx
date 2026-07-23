@@ -201,7 +201,11 @@ function formatDate(value) {
 }
 
 function statusTone(value) {
-  if (["VALID", "SUFFICIENT", "AVAILABLE", "RUNNING"].includes(value)) {
+  if (
+    ["VALID", "SUFFICIENT", "AVAILABLE", "RUNNING"].includes(
+      String(value).toUpperCase(),
+    )
+  ) {
     return "positive";
   }
   if (["INVALID", "INSUFFICIENT", "UNAVAILABLE"].includes(value)) {
@@ -615,7 +619,7 @@ export default function App() {
         account.provider_api_status === "AVAILABLE",
     ).length;
     const running = syncResult?.resources.filter(
-      (resource) => resource.status === "RUNNING",
+      (resource) => resource.status?.toUpperCase() === "RUNNING",
     ).length;
     return {
       total: accounts.length,
@@ -643,7 +647,7 @@ export default function App() {
       setNotice(
         result.success
           ? `${account.display_name || account.external_account_id} 검증에 성공했습니다.`
-          : "검증은 완료됐지만 확인이 필요한 프로젝트가 있습니다.",
+          : "검증은 완료됐지만 확인이 필요한 관리 범위가 있습니다.",
       );
       await loadAccounts();
     } catch (requestError) {
@@ -713,7 +717,7 @@ export default function App() {
           <article><span>등록 계정</span><strong>{metrics.total}</strong><small>all provider accounts</small></article>
           <article><span>정상 계정</span><strong>{metrics.healthy}</strong><small>인증·권한·API 정상</small></article>
           <article><span>관리 범위</span><strong>{metrics.scopes}</strong><small>projects · regions · subscriptions</small></article>
-          <article><span>실행 중 VM</span><strong>{metrics.running}</strong><small>최근 GCP Sync 결과 기준</small></article>
+          <article><span>실행 중 VM</span><strong>{metrics.running}</strong><small>최근 Sync 결과 기준</small></article>
         </section>
 
         {notice && (

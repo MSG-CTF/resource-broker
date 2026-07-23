@@ -1,0 +1,9 @@
+services:
+  app:
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/gcp-adc.json
+    volumes:
+      - type: bind
+        source: ${GCP_ADC_PATH:?Set GCP_ADC_PATH in .env}
+        target: /var/run/secrets/gcp-adc.json
+        read_only: true

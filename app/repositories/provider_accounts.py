@@ -1,0 +1,131 @@
+from dataclasses import dataclass
+from datetime import datetime
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.adapters.base import ProviderInstanceSummary
+from app.db.tables import ProviderAccountTable, ResourceTargetTable
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceSyncResult:
+    created_count: int
+    updated_count: int
+    retired_count: int
+    resources: tuple[ResourceTargetTable, ...]
+
+
+class ProviderAccountRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, account: ProviderAccountTable) -> ProviderAccountTable:
+        self._session.add(account)
+        self._session.flush()
+        return account
+
+    def get(self, account_id: UUID) -> ProviderAccountTable | None:
+        return self._session.get(ProviderAccountTable, account_id)
+
+    def list_all(self) -> tuple[ProviderAccountTable, ...]:
+        statement = select(ProviderAccountTable).order_by(
+            ProviderAccountTable.created_at,
+            ProviderAccountTable.account_id,
+        )
+        return tuple(self._session.scalars(statement).all())
+
+
+class ResourceTargetRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def sync_instances(
+        self,
+        *,
+        account_id: UUID,
+        scope_ids: tuple[str, ...],
+        instances: tuple[ProviderInstanceSummary, ...],
+        observed_at: datetime,
+    ) -> ResourceSyncResult:
+        statement = select(ResourceTargetTable).where(
+            ResourceTargetTable.account_id == account_id,
+            ResourceTargetTable.provider_scope_id.in_(scope_ids),
+        )
+        existing_resources = tuple(self._session.scalars(statement).all())
+        existing_by_key = {
+            (resource.provider_scope_id, resource.provider_instance_id): resource
+            for resource in existing_resources
+        }
+
+        seen_keys: set[tuple[str, str]] = set()
+        synchronized_resources: list[ResourceTargetTable] = []
+        created_count = 0
+        updated_count = 0
+
+        for instance in instances:
+            key = (
+                instance.provider_scope_id,
+                instance.provider_instance_id,
+            )
+            seen_keys.add(key)
+            resource = existing_by_key.get(key)
+
+            if resource is None:
+                resource = ResourceTargetTable(
+                    account_id=account_id,
+                    provider_instance_id=instance.provider_instance_id,
+                    provider_scope_id=instance.provider_scope_id,
+                    instance_name=instance.name,
+                    provider_instance_state=instance.status,
+                    provider_machine_type=instance.machine_type,
+                    private_ip=instance.internal_ip,
+                    public_ip=instance.external_ip,
+                    region=instance.region,
+                    zone=instance.zone,
+                    observed_at=observed_at,
+                    last_seen_at=observed_at,
+                )
+                self._session.add(resource)
+                created_count += 1
+            else:
+                resource.instance_name = instance.name
+                resource.provider_instance_state = instance.status
+                resource.provider_machine_type = instance.machine_type
+                resource.private_ip = instance.internal_ip
+                resource.public_ip = instance.external_ip
+                resource.region = instance.region
+                resource.zone = instance.zone
+                resource.observed_at = observed_at
+                resource.last_seen_at = observed_at
+                resource.retired_at = None
+                updated_count += 1
+
+            synchronized_resources.append(resource)
+
+        retired_count = 0
+        for resource in existing_resources:
+            key = (
+                resource.provider_scope_id,
+                resource.provider_instance_id,
+            )
+            if key in seen_keys or resource.retired_at is not None:
+                continue
+            resource.retired_at = observed_at
+            retired_count += 1
+
+        self._session.flush()
+        synchronized_resources.sort(
+            key=lambda resource: (
+                resource.provider_scope_id or "",
+                resource.zone or "",
+                resource.instance_name or "",
+            )
+        )
+        return ResourceSyncResult(
+            created_count=created_count,
+            updated_count=updated_count,
+            retired_count=retired_count,
+            resources=tuple(synchronized_resources),
+        )
