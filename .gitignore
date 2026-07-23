@@ -93,3 +93,5 @@ htmlcov/
 
 docker-compose.override.yml
 compose.override.yml
+
+node_modules/

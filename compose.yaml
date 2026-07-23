@@ -66,5 +66,30 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  frontend:
+    image: msg-broker-admin:dev
+    build:
+      context: ./frontend
+    environment:
+      VITE_PROXY_TARGET: http://app:8000
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --tries=1
+        - --spider
+        - http://127.0.0.1:5173
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
