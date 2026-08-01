@@ -2,8 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   ApiError,
+  clearAdminToken,
   createProviderAccount,
+  deleteProviderAccount,
+  getAdminToken,
   listProviderAccounts,
+  listResourceTargets,
+  loginAdmin,
+  setAdminToken,
   syncProviderAccount,
   verifyProviderAccount,
 } from "./api/providerAccounts.js";
@@ -13,10 +19,11 @@ const PROVIDER_DEFINITIONS = {
     label: "Google Cloud",
     shortLabel: "GCP",
     avatar: "G",
-    accountLabel: "Gmail 계정",
-    accountPlaceholder: "example@gmail.com",
-    accountType: "email",
-    accountHelp: "실제 클라우드 계정을 식별하는 Gmail 주소입니다.",
+    accountLabel: "외부 관리 계정 ID",
+    accountPlaceholder: "예: team-alpha 또는 owner@example.com",
+    accountType: "text",
+    accountHelp:
+      "프로젝트 묶음의 소유자나 관리 단위를 구분하는 ID입니다. GCP 인증에는 사용하지 않습니다.",
     configFields: [
       {
         name: "projectIds",
@@ -82,56 +89,10 @@ const PROVIDER_DEFINITIONS = {
       },
     ],
   },
-  OCI: {
-    label: "Oracle Cloud Infrastructure",
-    shortLabel: "OCI",
-    avatar: "O",
-    accountLabel: "Tenancy OCID",
-    accountPlaceholder: "ocid1.tenancy.oc1...",
-    accountType: "text",
-    accountHelp: "OCI 계정을 식별하는 Tenancy OCID입니다.",
-    configFields: [
-      {
-        name: "compartmentIds",
-        configKey: "compartment_ids",
-        label: "Compartment OCIDs",
-        placeholder: "ocid1.compartment.oc1...",
-        help: "Compute 인스턴스를 조회할 Compartment를 입력하세요.",
-        kind: "list",
-      },
-      {
-        name: "regions",
-        configKey: "regions",
-        label: "OCI Regions",
-        placeholder: "ap-chuncheon-1",
-        help: "조회할 OCI Region을 입력하세요.",
-        kind: "list",
-      },
-    ],
-  },
-  NCP: {
-    label: "NAVER Cloud Platform",
-    shortLabel: "NCP",
-    avatar: "N",
-    accountLabel: "계정/Sub Account 식별자",
-    accountPlaceholder: "ncp-account-01",
-    accountType: "text",
-    accountHelp: "팀에서 관리할 NCP 계정 또는 Sub Account 식별자입니다.",
-    configFields: [
-      {
-        name: "regionCodes",
-        configKey: "region_codes",
-        label: "NCP Region Codes",
-        placeholder: "KR\nSGN",
-        help: "Server를 조회할 Region Code를 입력하세요.",
-        kind: "list",
-      },
-    ],
-  },
 };
 
-const PROVIDER_ORDER = ["GCP", "AWS", "AZURE", "OCI", "NCP"];
-const ACTIVE_PROVIDERS = new Set(["GCP"]);
+const PROVIDER_ORDER = ["GCP", "AWS", "AZURE"];
+const ACTIVE_PROVIDERS = new Set(["GCP", "AZURE"]);
 
 const STATUS_LABELS = {
   VALID: "인증 정상",
@@ -183,10 +144,6 @@ function accountScopes(account) {
       return config.regions || [];
     case "AZURE":
       return config.subscription_ids || [];
-    case "OCI":
-      return config.compartment_ids || [];
-    case "NCP":
-      return config.region_codes || [];
     default:
       return [];
   }
@@ -198,6 +155,39 @@ function formatDate(value) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatCpu(value) {
+  if (value === null || value === undefined) return "미수집";
+  if (value % 1000 === 0) return `${value / 1000} vCPU`;
+  return `${value}m`;
+}
+
+function formatMib(value) {
+  if (value === null || value === undefined) return "미수집";
+  return `${new Intl.NumberFormat("en-US").format(value)} MiB`;
+}
+
+function CapacitySummary({ capacity, label = "사양", variant = "default" }) {
+  return (
+    <section className={`capacity-summary capacity-${variant}`}>
+      <span className="capacity-label">{label}</span>
+      <div className="capacity-metrics">
+        <div>
+          <span>CPU</span>
+          <strong>{formatCpu(capacity?.cpu_millicores)}</strong>
+        </div>
+        <div>
+          <span>Memory</span>
+          <strong>{formatMib(capacity?.memory_mib)}</strong>
+        </div>
+        <div>
+          <span>Storage</span>
+          <strong>{formatMib(capacity?.storage_mib)}</strong>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function statusTone(value) {
@@ -248,6 +238,82 @@ function ErrorBanner({ error, onClose }) {
   );
 }
 
+function LoginScreen({ onAuthenticated }) {
+  const [adminId, setAdminId] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      const response = await loginAdmin(adminId.trim(), password);
+      setAdminToken(response.access_token);
+      setPassword("");
+      onAuthenticated();
+    } catch (requestError) {
+      setError(requestError);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="login-shell">
+      <section className="login-card" aria-labelledby="login-title">
+        <div className="login-brand">
+          <div className="brand-mark">MB</div>
+          <div>
+            <strong>MSG Broker</strong>
+            <span>Administrator console</span>
+          </div>
+        </div>
+
+        <div className="login-heading">
+          <span className="eyebrow">Restricted access</span>
+          <h1 id="login-title">관리자 로그인</h1>
+          <p>클라우드 계정과 VM 정보를 관리하려면 인증이 필요합니다.</p>
+        </div>
+
+        <ErrorBanner error={error} onClose={() => setError(null)} />
+
+        <form className="login-form" onSubmit={handleSubmit}>
+          <label>
+            <span>관리자 ID</span>
+            <input
+              type="text"
+              value={adminId}
+              onChange={(event) => setAdminId(event.target.value)}
+              autoComplete="username"
+              required
+              autoFocus
+            />
+          </label>
+          <label>
+            <span>비밀번호</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
+          <button
+            className="button button-primary button-block"
+            disabled={submitting}
+          >
+            {submitting ? "로그인 중..." : "로그인"}
+          </button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function RegisterForm({ onCreated }) {
   const [form, setForm] = useState(createEmptyForm());
   const [submitting, setSubmitting] = useState(false);
@@ -288,10 +354,7 @@ function RegisterForm({ onCreated }) {
     setError(null);
     setSubmitting(true);
 
-    const externalAccountId =
-      form.provider === "GCP"
-        ? form.externalAccountId.trim().toLowerCase()
-        : form.externalAccountId.trim();
+    const externalAccountId = form.externalAccountId.trim();
 
     try {
       const account = await createProviderAccount({
@@ -416,7 +479,13 @@ function RegisterForm({ onCreated }) {
   );
 }
 
-function AccountTable({ accounts, actionState, onVerify, onSync }) {
+function AccountTable({
+  accounts,
+  actionState,
+  onVerify,
+  onSync,
+  onDelete,
+}) {
   if (accounts.length === 0) {
     return (
       <div className="empty-state">
@@ -446,6 +515,7 @@ function AccountTable({ accounts, actionState, onVerify, onSync }) {
             const isImplemented = ACTIVE_PROVIDERS.has(account.provider);
             const isVerifying = actionState === `verify:${account.account_id}`;
             const isSyncing = actionState === `sync:${account.account_id}`;
+            const isDeleting = actionState === `delete:${account.account_id}`;
             const scopes = accountScopes(account);
 
             return (
@@ -504,6 +574,15 @@ function AccountTable({ accounts, actionState, onVerify, onSync }) {
                     >
                       {isSyncing ? "동기화 중..." : "Sync"}
                     </button>
+                    <button
+                      className="button button-danger"
+                      type="button"
+                      disabled={Boolean(actionState)}
+                      title="Broker DB에서 계정과 VM snapshot 삭제"
+                      onClick={() => onDelete(account)}
+                    >
+                      {isDeleting ? "삭제 중..." : "삭제"}
+                    </button>
                     {!isImplemented && <small className="adapter-pending">준비 중</small>}
                   </div>
                 </td>
@@ -520,7 +599,7 @@ function SyncResult({ result, accountName }) {
   if (!result) return null;
 
   return (
-    <section className="panel resources-panel" aria-labelledby="resources-title">
+    <section className="panel sync-result-panel" aria-labelledby="resources-title">
       <div className="panel-heading resources-heading">
         <div>
           <span className="eyebrow">Latest cloud snapshot</span>
@@ -540,52 +619,258 @@ function SyncResult({ result, accountName }) {
         <div><span>Retired</span><strong>{result.retired_count}</strong></div>
       </div>
 
-      {result.resources.length > 0 ? (
-        <div className="table-wrap resource-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>VM</th>
-                <th>위치</th>
-                <th>사양</th>
-                <th>네트워크</th>
-                <th>상태</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.resources.map((resource) => (
-                <tr key={resource.resource_target_id}>
-                  <td>
-                    <strong>{resource.name}</strong>
-                    <span className="subtle-text">ID {resource.instance_id}</span>
-                  </td>
-                  <td>
-                    <strong>{resource.region}</strong>
-                    <span className="subtle-text">{resource.zone}</span>
-                  </td>
-                  <td><code>{resource.machine_type}</code></td>
-                  <td>
-                    <span>{resource.internal_ip || "내부 IP 없음"}</span>
-                    <span className="subtle-text">
-                      {resource.external_ip || "외부 IP 없음"}
-                    </span>
-                  </td>
-                  <td><StatusBadge value={resource.status} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {result.scopes?.some((scope) => !scope.success) && (
+        <div className="scope-warning">
+          {result.scopes
+            .filter((scope) => !scope.success)
+            .map((scope) => (
+              <span key={scope.scope_id}>
+                {scope.scope_id} · {scope.message || scope.error_code}
+              </span>
+            ))}
         </div>
-      ) : (
-        <div className="empty-inline">조회된 VM이 없습니다.</div>
       )}
     </section>
   );
 }
 
-export default function App() {
+function ResourceInventory({
+  resources,
+  loading,
+  provider,
+  onProviderChange,
+  onRefresh,
+}) {
+  const [selectedResource, setSelectedResource] = useState(null);
+
+  useEffect(() => {
+    if (!selectedResource) return undefined;
+
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setSelectedResource(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [selectedResource]);
+
+  const selectedDefinition = selectedResource
+    ? PROVIDER_DEFINITIONS[selectedResource.provider] ||
+      PROVIDER_DEFINITIONS.GCP
+    : null;
+  const selectedScopeLabel =
+    selectedResource?.provider === "AZURE"
+      ? "Subscription ID"
+      : selectedResource?.provider === "GCP"
+        ? "Project ID"
+        : "Scope ID";
+
+  return (
+    <section className="panel resources-panel" aria-labelledby="inventory-title">
+      <div className="panel-heading resources-heading">
+        <div>
+          <span className="eyebrow">Database snapshot</span>
+          <h2 id="inventory-title">전체 VM 인벤토리</h2>
+          <p>Cloud API를 다시 호출하지 않고 Broker DB 값을 표시합니다.</p>
+        </div>
+        <div className="inventory-controls">
+          <select
+            value={provider}
+            onChange={(event) => onProviderChange(event.target.value)}
+            aria-label="클라우드 필터"
+          >
+            <option value="">전체 클라우드</option>
+            {PROVIDER_ORDER.map((item) => (
+              <option key={item} value={item}>
+                {PROVIDER_DEFINITIONS[item].label}
+              </option>
+            ))}
+          </select>
+          <button className="button button-ghost" type="button" onClick={onRefresh}>
+            새로고침
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="loading-state">VM 목록을 불러오는 중입니다...</div>
+      ) : resources.length === 0 ? (
+        <div className="empty-inline">
+          저장된 VM이 없습니다. 계정을 동기화하면 이곳에 표시됩니다.
+        </div>
+      ) : (
+        <div className="vm-list">
+          <div className="vm-list-header" aria-hidden="true">
+            <span>VM</span>
+            <span>환경</span>
+            <span>Provider 전체 사양</span>
+            <span />
+            <span>Allocatable</span>
+            <span>네트워크</span>
+          </div>
+          {resources.map((resource) => {
+            const definition =
+              PROVIDER_DEFINITIONS[resource.provider] ||
+              PROVIDER_DEFINITIONS.GCP;
+            return (
+              <article
+                className="vm-list-row"
+                key={resource.resource_target_id}
+                role="button"
+                tabIndex={0}
+                aria-label={`${resource.name || "이름 없는 VM"} 상세 정보 열기`}
+                onClick={() => setSelectedResource(resource)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedResource(resource);
+                  }
+                }}
+              >
+                <section className="vm-list-identity">
+                  <div className="vm-identity">
+                    <div className="provider-avatar">{definition.avatar}</div>
+                    <div>
+                      <span className="vm-provider">{definition.label}</span>
+                      <h3>{resource.name || "이름 없는 VM"}</h3>
+                      <p>
+                        {resource.account_display_name ||
+                          resource.external_account_id}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="vm-status">
+                    <StatusBadge value={resource.status || "UNKNOWN"} />
+                    {resource.retired_at && <span>Retired</span>}
+                  </div>
+                </section>
+
+                <section className="vm-list-environment">
+                  <div>
+                    <span>Machine type</span>
+                    <strong>{resource.machine_type || "미수집"}</strong>
+                  </div>
+                  <div>
+                    <span>Location</span>
+                    <strong>
+                      {resource.region}
+                      {resource.zone ? ` · ${resource.zone}` : ""}
+                    </strong>
+                  </div>
+                </section>
+
+                <div className="vm-list-capacity">
+                  <CapacitySummary
+                    capacity={resource.provider_capacity}
+                    label="Provider 전체 사양"
+                    variant="provider"
+                  />
+                </div>
+                <div className="capacity-list-arrow" aria-hidden="true">→</div>
+                <div className="vm-list-capacity">
+                  <CapacitySummary
+                    capacity={resource.allocatable_capacity}
+                    label="Allocatable"
+                    variant="allocatable"
+                  />
+                </div>
+
+                <section className="vm-list-network">
+                  <span>
+                    <strong>Private IP</strong>
+                    {resource.internal_ip || "없음"}
+                  </span>
+                  <span>
+                    <strong>Public IP</strong>
+                    {resource.external_ip || "없음"}
+                  </span>
+                </section>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {selectedResource && (
+        <div
+          className="resource-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedResource(null);
+            }
+          }}
+        >
+          <section
+            className="resource-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="resource-modal-title"
+          >
+            <header className="resource-modal-header">
+              <div className="vm-identity">
+                <div className="provider-avatar">{selectedDefinition.avatar}</div>
+                <div>
+                  <span className="vm-provider">{selectedDefinition.label}</span>
+                  <h2 id="resource-modal-title">
+                    {selectedResource.name || "이름 없는 VM"}
+                  </h2>
+                </div>
+              </div>
+              <button
+                className="resource-modal-close"
+                type="button"
+                aria-label="상세 정보 닫기"
+                onClick={() => setSelectedResource(null)}
+              >
+                ×
+              </button>
+            </header>
+
+            <div className="resource-modal-body">
+              <div className="resource-detail-primary">
+                <span>Broker Account ID</span>
+                <code>{selectedResource.account_id}</code>
+              </div>
+              <div className="resource-detail-primary">
+                <span>{selectedScopeLabel}</span>
+                <code>{selectedResource.scope_id || "없음"}</code>
+              </div>
+              <dl className="resource-detail-grid">
+                <div>
+                  <dt>계정 표시 이름</dt>
+                  <dd>{selectedResource.account_display_name || "없음"}</dd>
+                </div>
+                <div>
+                  <dt>External Account ID</dt>
+                  <dd>{selectedResource.external_account_id || "없음"}</dd>
+                </div>
+                <div>
+                  <dt>Resource Target ID</dt>
+                  <dd>{selectedResource.resource_target_id}</dd>
+                </div>
+                <div>
+                  <dt>Provider Instance ID</dt>
+                  <dd>{selectedResource.instance_id || "없음"}</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AdminDashboard({ onLogout }) {
+  const [activeView, setActiveView] = useState("accounts");
   const [accounts, setAccounts] = useState([]);
+  const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [resourceLoading, setResourceLoading] = useState(true);
+  const [resourceProvider, setResourceProvider] = useState("");
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -607,9 +892,30 @@ export default function App() {
     }
   }, []);
 
+  const loadResources = useCallback(async () => {
+    setResourceLoading(true);
+    try {
+      const response = await listResourceTargets({
+        provider: resourceProvider,
+      });
+      setResources(response.items);
+      setConnected(true);
+      setError(null);
+    } catch (requestError) {
+      setConnected(false);
+      setError(requestError);
+    } finally {
+      setResourceLoading(false);
+    }
+  }, [resourceProvider]);
+
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts]);
+
+  useEffect(() => {
+    loadResources();
+  }, [loadResources]);
 
   const metrics = useMemo(() => {
     const healthy = accounts.filter(
@@ -618,9 +924,18 @@ export default function App() {
         account.permission_status === "SUFFICIENT" &&
         account.provider_api_status === "AVAILABLE",
     ).length;
-    const running = syncResult?.resources.filter(
+    const running = resources.filter(
       (resource) => resource.status?.toUpperCase() === "RUNNING",
     ).length;
+    const totalCpuMillicores = resources.reduce(
+      (sum, resource) =>
+        sum + (resource.provider_capacity?.cpu_millicores || 0),
+      0,
+    );
+    const totalMemoryMib = resources.reduce(
+      (sum, resource) => sum + (resource.provider_capacity?.memory_mib || 0),
+      0,
+    );
     return {
       total: accounts.length,
       healthy,
@@ -628,9 +943,12 @@ export default function App() {
         (sum, account) => sum + accountScopes(account).length,
         0,
       ),
-      running: running ?? "—",
+      running,
+      resourceTotal: resources.length,
+      totalCpuMillicores,
+      totalMemoryMib,
     };
-  }, [accounts, syncResult]);
+  }, [accounts, resources]);
 
   async function handleCreated(account) {
     setNotice(`${account.display_name || account.external_account_id} 계정을 등록했습니다.`);
@@ -668,13 +986,42 @@ export default function App() {
       setSyncAccountName(account.display_name || account.external_account_id);
       setNotice(`${result.discovered_count}개의 VM을 동기화했습니다.`);
       await loadAccounts();
+      await loadResources();
+      setActiveView("resources");
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 502) {
         setSyncResult(requestError.payload);
         setSyncAccountName(account.display_name || account.external_account_id);
+        setActiveView("resources");
       }
       setError(requestError);
       await loadAccounts();
+    } finally {
+      setActionState(null);
+    }
+  }
+
+  async function handleDelete(account) {
+    const accountName = account.display_name || account.external_account_id;
+    const confirmed = window.confirm(
+      `"${accountName}" 계정과 Broker DB에 저장된 VM snapshot을 삭제할까요?\n\n실제 클라우드 VM은 삭제되지 않습니다.`,
+    );
+    if (!confirmed) return;
+
+    setError(null);
+    setNotice(null);
+    setActionState(`delete:${account.account_id}`);
+    try {
+      const result = await deleteProviderAccount(account.account_id);
+      setSyncResult(null);
+      setSyncAccountName("");
+      setNotice(
+        `${accountName} 계정과 VM snapshot ${result.deleted_resource_count}개를 삭제했습니다.`,
+      );
+      await loadAccounts();
+      await loadResources();
+    } catch (requestError) {
+      setError(requestError);
     } finally {
       setActionState(null);
     }
@@ -690,78 +1037,170 @@ export default function App() {
             <span>Cloud control plane</span>
           </div>
         </div>
-        <div className={`connection-state ${connected ? "is-online" : "is-offline"}`}>
-          <span aria-hidden="true" />
-          {connected ? "Broker API 연결됨" : "Broker API 연결 끊김"}
+        <div className="topbar-actions">
+          <div className={`connection-state ${connected ? "is-online" : "is-offline"}`}>
+            <span aria-hidden="true" />
+            {connected ? "Broker API 연결됨" : "Broker API 연결 끊김"}
+          </div>
+          <button
+            className="button button-topbar"
+            type="button"
+            onClick={onLogout}
+          >
+            로그아웃
+          </button>
         </div>
       </header>
 
       <main>
-        <section className="hero">
-          <div>
-            <span className="eyebrow">Provider operations</span>
-            <h1>멀티클라우드 계정과 VM을<br />한곳에서 관리하세요.</h1>
-            <p>
-              Provider별 계정 설정을 등록하고, 준비된 어댑터를 통해 인증 검증과
-              VM 목록 동기화를 수행합니다.
-            </p>
-          </div>
-          <div className="hero-note">
-            <span>Adapter status</span>
-            <strong>GCP 활성 · 4개 준비 중</strong>
-            <p>AWS, Azure, OCI, NCP는 계정 계약과 등록 화면을 먼저 제공합니다.</p>
-          </div>
-        </section>
+        <nav className="file-navigation" aria-label="관리 화면">
+          <button
+            className={`file-tab ${activeView === "accounts" ? "is-active" : ""}`}
+            type="button"
+            aria-current={activeView === "accounts" ? "page" : undefined}
+            onClick={() => setActiveView("accounts")}
+          >
+            <span className="file-icon" aria-hidden="true" />
+            <span>
+              <strong>계정 관리</strong>
+              <small>{metrics.total} accounts</small>
+            </span>
+          </button>
+          <button
+            className={`file-tab ${activeView === "resources" ? "is-active" : ""}`}
+            type="button"
+            aria-current={activeView === "resources" ? "page" : undefined}
+            onClick={() => setActiveView("resources")}
+          >
+            <span className="file-icon" aria-hidden="true" />
+            <span>
+              <strong>전체 VM</strong>
+              <small>{metrics.resourceTotal} resources</small>
+            </span>
+          </button>
+        </nav>
 
-        <section className="metric-grid" aria-label="계정 요약">
-          <article><span>등록 계정</span><strong>{metrics.total}</strong><small>all provider accounts</small></article>
-          <article><span>정상 계정</span><strong>{metrics.healthy}</strong><small>인증·권한·API 정상</small></article>
-          <article><span>관리 범위</span><strong>{metrics.scopes}</strong><small>projects · regions · subscriptions</small></article>
-          <article><span>실행 중 VM</span><strong>{metrics.running}</strong><small>최근 Sync 결과 기준</small></article>
-        </section>
-
-        {notice && (
-          <div className="notice notice-success" role="status">
-            <strong>완료</strong>
-            <p>{notice}</p>
-            <button type="button" onClick={() => setNotice(null)}>닫기</button>
-          </div>
-        )}
-        <ErrorBanner error={error} onClose={() => setError(null)} />
-
-        <div className="workspace-grid">
-          <RegisterForm onCreated={handleCreated} />
-
-          <section className="panel accounts-panel" aria-labelledby="accounts-title">
-            <div className="panel-heading">
-              <div>
-                <span className="eyebrow">Provider inventory</span>
-                <h2 id="accounts-title">등록된 계정</h2>
-              </div>
-              <button className="button button-ghost" type="button" onClick={loadAccounts}>
-                새로고침
-              </button>
+        <div className="view-surface">
+          {notice && (
+            <div className="notice notice-success" role="status">
+              <strong>완료</strong>
+              <p>{notice}</p>
+              <button type="button" onClick={() => setNotice(null)}>닫기</button>
             </div>
-            {loading ? (
-              <div className="loading-state">계정 목록을 불러오는 중입니다...</div>
-            ) : (
-              <AccountTable
-                accounts={accounts}
-                actionState={actionState}
-                onVerify={handleVerify}
-                onSync={handleSync}
-              />
-            )}
-          </section>
-        </div>
+          )}
+          <ErrorBanner error={error} onClose={() => setError(null)} />
 
-        <SyncResult result={syncResult} accountName={syncAccountName} />
+          {activeView === "accounts" ? (
+            <>
+              <div className="view-title">
+                <div>
+                  <span className="eyebrow">Provider accounts</span>
+                  <h1>계정 관리</h1>
+                </div>
+                <span>등록 · 검증 · 동기화 · 삭제</span>
+              </div>
+
+              <section className="metric-grid metric-grid-accounts" aria-label="계정 요약">
+                <article><span>등록 계정</span><strong>{metrics.total}</strong><small>all provider accounts</small></article>
+                <article><span>정상 계정</span><strong>{metrics.healthy}</strong><small>인증·권한·API 정상</small></article>
+                <article><span>관리 범위</span><strong>{metrics.scopes}</strong><small>projects · regions · subscriptions</small></article>
+              </section>
+
+              <div className="workspace-grid">
+                <RegisterForm onCreated={handleCreated} />
+
+                <section className="panel accounts-panel" aria-labelledby="accounts-title">
+                  <div className="panel-heading">
+                    <div>
+                      <span className="eyebrow">Provider inventory</span>
+                      <h2 id="accounts-title">등록된 계정</h2>
+                    </div>
+                    <button className="button button-ghost" type="button" onClick={loadAccounts}>
+                      새로고침
+                    </button>
+                  </div>
+                  {loading ? (
+                    <div className="loading-state">계정 목록을 불러오는 중입니다...</div>
+                  ) : (
+                    <AccountTable
+                      accounts={accounts}
+                      actionState={actionState}
+                      onVerify={handleVerify}
+                      onSync={handleSync}
+                      onDelete={handleDelete}
+                    />
+                  )}
+                </section>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="view-title">
+                <div>
+                  <span className="eyebrow">Resource targets</span>
+                  <h1>전체 VM</h1>
+                </div>
+                <span>Broker DB snapshot</span>
+              </div>
+
+              <section className="metric-grid metric-grid-resources" aria-label="VM 요약">
+                <article><span>조회된 VM</span><strong>{metrics.resourceTotal}</strong><small>현재 필터 기준</small></article>
+                <article><span>실행 중 VM</span><strong>{metrics.running}</strong><small>provider state RUNNING</small></article>
+                <article><span>전체 CPU</span><strong>{formatCpu(metrics.totalCpuMillicores)}</strong><small>provider capacity 합계</small></article>
+                <article><span>전체 Memory</span><strong>{formatMib(metrics.totalMemoryMib)}</strong><small>provider capacity 합계</small></article>
+              </section>
+
+              <SyncResult result={syncResult} accountName={syncAccountName} />
+              <ResourceInventory
+                resources={resources}
+                loading={resourceLoading}
+                provider={resourceProvider}
+                onProviderChange={setResourceProvider}
+                onRefresh={loadResources}
+              />
+            </>
+          )}
+        </div>
       </main>
 
       <footer>
         <span>MSG Resource Broker</span>
-        <span>Admin 인증은 연동 테스트 후 추가 예정</span>
+        <span>관리자 인증으로 보호됨</span>
       </footer>
     </div>
   );
+}
+
+export default function App() {
+  const [authenticated, setAuthenticated] = useState(
+    () => Boolean(getAdminToken()),
+  );
+
+  useEffect(() => {
+    function handleExpiredAuthentication() {
+      setAuthenticated(false);
+    }
+
+    window.addEventListener(
+      "admin-auth-expired",
+      handleExpiredAuthentication,
+    );
+    return () => {
+      window.removeEventListener(
+        "admin-auth-expired",
+        handleExpiredAuthentication,
+      );
+    };
+  }, []);
+
+  function handleLogout() {
+    clearAdminToken();
+    setAuthenticated(false);
+  }
+
+  if (!authenticated) {
+    return <LoginScreen onAuthenticated={() => setAuthenticated(true)} />;
+  }
+
+  return <AdminDashboard onLogout={handleLogout} />;
 }

@@ -1,7 +1,13 @@
 x-broker-image: &broker-image
-  image: msg-resource-broker:dev
+  image: ${BROKER_IMAGE:-msg-resource-broker:latest}
   build:
     context: .
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
   db:
@@ -9,9 +15,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-broker}
       POSTGRES_USER: ${POSTGRES_USER:-broker}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-broker-local-password}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,13 +31,13 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    logging: *default-logging
     restart: unless-stopped
 
   migrate:
     <<: *broker-image
     environment:
-      DATABASE_URL: >-
-        ${DATABASE_URL:-postgresql+psycopg://broker:broker-local-password@db:5432/broker}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
     command:
       - alembic
       - upgrade
@@ -39,15 +45,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    logging: *default-logging
     restart: "no"
 
   app:
     <<: *broker-image
     environment:
-      DATABASE_URL: >-
-        ${DATABASE_URL:-postgresql+psycopg://broker:broker-local-password@db:5432/broker}
-    ports:
-      - "${BROKER_PORT:-8000}:8000"
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      ADMIN_ID: ${ADMIN_ID:?Set ADMIN_ID in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      ADMIN_TOKEN_SECRET: ${ADMIN_TOKEN_SECRET:?Set ADMIN_TOKEN_SECRET in .env}
+      ADMIN_TOKEN_TTL_SECONDS: ${ADMIN_TOKEN_TTL_SECONDS:-28800}
+    expose:
+      - "8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -64,16 +74,19 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
     restart: unless-stopped
 
   frontend:
-    image: msg-broker-admin:dev
+    image: ${FRONTEND_IMAGE:-msg-broker-admin:latest}
     build:
       context: ./frontend
-    environment:
-      VITE_PROXY_TARGET: http://app:8000
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
+      - >-
+        ${BROKER_HTTP_BIND_ADDRESS:-127.0.0.1}:${BROKER_HTTP_PORT:-8080}:80
     depends_on:
       app:
         condition: service_healthy
@@ -84,11 +97,14 @@ services:
         - --quiet
         - --tries=1
         - --spider
-        - http://127.0.0.1:5173
+        - http://127.0.0.1/health
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
     restart: unless-stopped
 
 volumes:

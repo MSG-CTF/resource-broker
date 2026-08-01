@@ -328,3 +328,79 @@ class ResourceTargetTable(Base):
     account: Mapped[ProviderAccountTable] = relationship(
         back_populates="resource_targets",
     )
+
+    runtime_containers: Mapped[list[RuntimeContainerTable]] = relationship(
+        back_populates="resource_target",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class RuntimeContainerTable(Base):
+    __tablename__ = "runtime_containers"
+    __table_args__ = (
+        CheckConstraint(
+            (
+                "cpu_usage_millicores IS NULL "
+                "OR cpu_usage_millicores >= 0"
+            ),
+            name="cpu_usage_non_negative",
+        ),
+        CheckConstraint(
+            "memory_usage_mib IS NULL OR memory_usage_mib >= 0",
+            name="memory_usage_non_negative",
+        ),
+        CheckConstraint(
+            "storage_usage_mib IS NULL OR storage_usage_mib >= 0",
+            name="storage_usage_non_negative",
+        ),
+    )
+
+    resource_target_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey(
+            "resource_targets.resource_target_id",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    container_id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+    )
+    container_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    pod_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    namespace: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    cpu_usage_millicores: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    memory_usage_mib: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    storage_usage_mib: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    resource_target: Mapped[ResourceTargetTable] = relationship(
+        back_populates="runtime_containers",
+    )

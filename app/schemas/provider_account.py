@@ -11,11 +11,13 @@ from pydantic import (
 )
 
 from app.domain.enums import (
+    Architecture,
     CredentialStatus,
     PermissionStatus,
     Provider,
     ProviderApiStatus,
 )
+from app.schemas.resource_target import ResourceCapacityResponse
 
 
 NonEmptyString = Annotated[
@@ -31,19 +33,20 @@ ExternalAccountId = Annotated[
         strict=True,
     ),
 ]
-GmailAddress = Annotated[
-    str,
-    StringConstraints(
-        strip_whitespace=True,
-        min_length=11,
-        max_length=255,
-        pattern=r"^[^@\s]+@gmail\.com$",
-        strict=True,
-    ),
-]
 AwsAccountId = Annotated[
     str,
     StringConstraints(pattern=r"^\d{12}$", strict=True),
+]
+AzureUuid = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        pattern=(
+            r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        ),
+        strict=True,
+    ),
 ]
 ProviderIdentifier = Annotated[
     str,
@@ -86,37 +89,19 @@ class AwsAccountConfig(ApiSchema):
 
 
 class AzureAccountConfig(ApiSchema):
-    client_id: ProviderIdentifier
-    subscription_ids: list[ProviderIdentifier] = Field(min_length=1)
+    client_id: AzureUuid
+    subscription_ids: list[AzureUuid] = Field(min_length=1)
+
+    @field_validator("client_id")
+    @classmethod
+    def normalize_client_id(cls, value: str) -> str:
+        return value.lower()
 
     @field_validator("subscription_ids")
     @classmethod
     def require_unique_subscriptions(cls, value: list[str]) -> list[str]:
-        return _require_unique_values("subscription_ids", value)
-
-
-class OciAccountConfig(ApiSchema):
-    compartment_ids: list[ProviderIdentifier] = Field(min_length=1)
-    regions: list[ProviderIdentifier] = Field(min_length=1)
-
-    @field_validator("compartment_ids")
-    @classmethod
-    def require_unique_compartments(cls, value: list[str]) -> list[str]:
-        return _require_unique_values("compartment_ids", value)
-
-    @field_validator("regions")
-    @classmethod
-    def require_unique_regions(cls, value: list[str]) -> list[str]:
-        return _require_unique_values("regions", value)
-
-
-class NcpAccountConfig(ApiSchema):
-    region_codes: list[ProviderIdentifier] = Field(min_length=1)
-
-    @field_validator("region_codes")
-    @classmethod
-    def require_unique_region_codes(cls, value: list[str]) -> list[str]:
-        return _require_unique_values("region_codes", value)
+        normalized = [subscription_id.lower() for subscription_id in value]
+        return _require_unique_values("subscription_ids", normalized)
 
 
 class ProviderAccountCreateBase(ApiSchema):
@@ -127,13 +112,8 @@ class ProviderAccountCreateBase(ApiSchema):
 
 class GcpAccountCreateRequest(ProviderAccountCreateBase):
     provider: Literal[Provider.GCP]
-    external_account_id: GmailAddress
+    external_account_id: ExternalAccountId
     config: GcpAccountConfig
-
-    @field_validator("external_account_id")
-    @classmethod
-    def normalize_gmail_address(cls, value: str) -> str:
-        return value.lower()
 
 
 class AwsAccountCreateRequest(ProviderAccountCreateBase):
@@ -144,25 +124,19 @@ class AwsAccountCreateRequest(ProviderAccountCreateBase):
 
 class AzureAccountCreateRequest(ProviderAccountCreateBase):
     provider: Literal[Provider.AZURE]
+    external_account_id: AzureUuid
     config: AzureAccountConfig
 
-
-class OciAccountCreateRequest(ProviderAccountCreateBase):
-    provider: Literal[Provider.OCI]
-    config: OciAccountConfig
-
-
-class NcpAccountCreateRequest(ProviderAccountCreateBase):
-    provider: Literal[Provider.NCP]
-    config: NcpAccountConfig
+    @field_validator("external_account_id")
+    @classmethod
+    def normalize_tenant_id(cls, value: str) -> str:
+        return value.lower()
 
 
 ProviderAccountCreateRequest = Annotated[
     GcpAccountCreateRequest
     | AwsAccountCreateRequest
-    | AzureAccountCreateRequest
-    | OciAccountCreateRequest
-    | NcpAccountCreateRequest,
+    | AzureAccountCreateRequest,
     Field(discriminator="provider"),
 ]
 
@@ -197,22 +171,10 @@ class AzureAccountResponse(ProviderAccountResponseBase):
     config: AzureAccountConfig
 
 
-class OciAccountResponse(ProviderAccountResponseBase):
-    provider: Literal[Provider.OCI]
-    config: OciAccountConfig
-
-
-class NcpAccountResponse(ProviderAccountResponseBase):
-    provider: Literal[Provider.NCP]
-    config: NcpAccountConfig
-
-
 ProviderAccountResponse = Annotated[
     GcpAccountResponse
     | AwsAccountResponse
-    | AzureAccountResponse
-    | OciAccountResponse
-    | NcpAccountResponse,
+    | AzureAccountResponse,
     Field(discriminator="provider"),
 ]
 
@@ -249,8 +211,11 @@ class ProviderResourceResponse(ApiSchema):
     zone: str | None
     status: str
     machine_type: str
+    architecture: Architecture | None
     internal_ip: str | None
     external_ip: str | None
+    provider_capacity: ResourceCapacityResponse
+    allocatable_capacity: ResourceCapacityResponse
 
 
 class ProviderAccountSyncResponse(ApiSchema):
@@ -263,6 +228,11 @@ class ProviderAccountSyncResponse(ApiSchema):
     retired_count: int = Field(ge=0)
     scopes: list[ProviderScopeResult]
     resources: list[ProviderResourceResponse]
+
+
+class ProviderAccountDeleteResponse(ApiSchema):
+    account_id: UUID
+    deleted_resource_count: int = Field(ge=0)
 
 
 class ErrorDetail(ApiSchema):

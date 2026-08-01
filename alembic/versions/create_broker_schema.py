@@ -5,7 +5,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision: str = "20260721_0001"
+revision: str = "20260801_0001"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -14,9 +14,7 @@ depends_on: str | Sequence[str] | None = None
 provider_enum = sa.Enum(
     "AWS",
     "GCP",
-    "OCI",
     "AZURE",
-    "NCP",
     name="provider",
     native_enum=False,
     create_constraint=True,
@@ -68,11 +66,7 @@ def upgrade() -> None:
             postgresql.UUID(as_uuid=True),
             nullable=False,
         ),
-        sa.Column(
-            "provider",
-            provider_enum,
-            nullable=False,
-        ),
+        sa.Column("provider", provider_enum, nullable=False),
         sa.Column(
             "external_account_id",
             sa.String(length=255),
@@ -174,35 +168,40 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column(
+            "provider_scope_id",
+            sa.String(length=255),
+            nullable=True,
+        ),
+        sa.Column(
             "instance_name",
             sa.String(length=255),
             nullable=True,
         ),
         sa.Column(
-            "region",
+            "provider_instance_state",
             sa.String(length=64),
-            nullable=False,
-        ),
-        sa.Column(
-            "zone",
-            sa.String(length=128),
             nullable=True,
         ),
         sa.Column(
-            "runtime_type",
-            runtime_type_enum,
-            nullable=True,
-        ),
-        sa.Column(
-            "target_id",
+            "provider_machine_type",
             sa.String(length=255),
             nullable=True,
         ),
         sa.Column(
-            "architecture",
-            architecture_enum,
+            "private_ip",
+            sa.String(length=64),
             nullable=True,
         ),
+        sa.Column(
+            "public_ip",
+            sa.String(length=64),
+            nullable=True,
+        ),
+        sa.Column("region", sa.String(length=64), nullable=False),
+        sa.Column("zone", sa.String(length=128), nullable=True),
+        sa.Column("runtime_type", runtime_type_enum, nullable=True),
+        sa.Column("target_id", sa.String(length=255), nullable=True),
+        sa.Column("architecture", architecture_enum, nullable=True),
         sa.Column(
             "provider_capacity_cpu_millicores",
             sa.Integer(),
@@ -340,19 +339,25 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint(
             "account_id",
+            "provider_scope_id",
             "provider_instance_id",
-            name="uq_resource_targets_account_provider_instance",
+            name="uq_resource_targets_account_scope_instance",
         ),
         sa.UniqueConstraint(
             "target_id",
             name="uq_resource_targets_target_id",
         ),
     )
-
     op.create_index(
         "ix_resource_targets_account_id",
         "resource_targets",
         ["account_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_resource_targets_account_scope",
+        "resource_targets",
+        ["account_id", "provider_scope_id"],
         unique=False,
     )
     op.create_index(
@@ -362,10 +367,74 @@ def upgrade() -> None:
         unique=False,
     )
 
+    op.create_table(
+        "runtime_containers",
+        sa.Column(
+            "resource_target_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=False,
+        ),
+        sa.Column(
+            "container_id",
+            sa.String(length=255),
+            nullable=False,
+        ),
+        sa.Column(
+            "container_name",
+            sa.String(length=255),
+            nullable=False,
+        ),
+        sa.Column("pod_name", sa.String(length=255), nullable=True),
+        sa.Column("namespace", sa.String(length=255), nullable=True),
+        sa.Column("status", sa.String(length=64), nullable=False),
+        sa.Column(
+            "cpu_usage_millicores",
+            sa.Integer(),
+            nullable=True,
+        ),
+        sa.Column("memory_usage_mib", sa.Integer(), nullable=True),
+        sa.Column("storage_usage_mib", sa.Integer(), nullable=True),
+        sa.Column(
+            "observed_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "cpu_usage_millicores IS NULL OR cpu_usage_millicores >= 0",
+            name=op.f("ck_runtime_containers_cpu_usage_non_negative"),
+        ),
+        sa.CheckConstraint(
+            "memory_usage_mib IS NULL OR memory_usage_mib >= 0",
+            name=op.f("ck_runtime_containers_memory_usage_non_negative"),
+        ),
+        sa.CheckConstraint(
+            "storage_usage_mib IS NULL OR storage_usage_mib >= 0",
+            name=op.f("ck_runtime_containers_storage_usage_non_negative"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["resource_target_id"],
+            ["resource_targets.resource_target_id"],
+            name=op.f(
+                "fk_runtime_containers_resource_target_id_resource_targets"
+            ),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint(
+            "resource_target_id",
+            "container_id",
+            name=op.f("pk_runtime_containers"),
+        ),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("runtime_containers")
     op.drop_index(
         "ix_resource_targets_candidate_state",
+        table_name="resource_targets",
+    )
+    op.drop_index(
+        "ix_resource_targets_account_scope",
         table_name="resource_targets",
     )
     op.drop_index(

@@ -8,9 +8,13 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.16,<2",
+    "azure-identity>=1.25,<2",
+    "azure-mgmt-compute>=38.1,<39",
+    "azure-mgmt-network>=30.2,<31",
     "fastapi>=0.136,<1",
     "google-cloud-compute>=1,<2",
     "psycopg[binary]>=3.2,<4",
+    "PyJWT>=2.12,<3",
     "pydantic>=2.13,<3",
     "sqlalchemy>=2.0,<3",
     "uvicorn[standard]>=0.44,<1",

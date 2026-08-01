@@ -1,3 +1,7 @@
+# 개인 에이전트 폴더
+/.agents/
+/AGENTS.md
+
 # 로컬 테스트를 위한 폴더
 /tests
 /scripts

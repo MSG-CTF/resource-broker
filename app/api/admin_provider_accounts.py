@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.api.admin_auth import require_admin
 from app.db.session import get_db_session
 from app.db.tables import ProviderAccountTable, ResourceTargetTable
 from app.domain.enums import Provider
@@ -14,9 +15,8 @@ from app.schemas.provider_account import (
     AzureAccountResponse,
     ErrorResponse,
     GcpAccountResponse,
-    NcpAccountResponse,
-    OciAccountResponse,
     ProviderAccountCreateRequest,
+    ProviderAccountDeleteResponse,
     ProviderAccountListResponse,
     ProviderAccountResponse,
     ProviderAccountSyncResponse,
@@ -24,6 +24,7 @@ from app.schemas.provider_account import (
     ProviderResourceResponse,
     ProviderScopeResult,
 )
+from app.schemas.resource_target import ResourceCapacityResponse
 from app.services.provider_account_service import (
     DuplicateProviderAccountError,
     InvalidProviderAccountConfigError,
@@ -39,6 +40,7 @@ from app.services.provider_account_service import (
 router = APIRouter(
     prefix="/v1/admin/provider-accounts",
     tags=["admin"],
+    dependencies=[Depends(require_admin)],
 )
 
 
@@ -54,8 +56,6 @@ ACCOUNT_RESPONSE_MODELS = {
     Provider.GCP: GcpAccountResponse,
     Provider.AWS: AwsAccountResponse,
     Provider.AZURE: AzureAccountResponse,
-    Provider.OCI: OciAccountResponse,
-    Provider.NCP: NcpAccountResponse,
 }
 
 
@@ -112,6 +112,11 @@ def _verify_response(
 def _resource_response(
     resource: ResourceTargetTable,
 ) -> ProviderResourceResponse:
+    allocatable = ResourceCapacityResponse(
+        cpu_millicores=resource.allocatable_cpu_millicores,
+        memory_mib=resource.allocatable_memory_mib,
+        storage_mib=resource.allocatable_ephemeral_storage_mib,
+    )
     return ProviderResourceResponse(
         resource_target_id=resource.resource_target_id,
         scope_id=resource.provider_scope_id or "",
@@ -121,8 +126,15 @@ def _resource_response(
         zone=resource.zone,
         status=resource.provider_instance_state or "",
         machine_type=resource.provider_machine_type or "",
+        architecture=resource.architecture,
         internal_ip=resource.private_ip,
         external_ip=resource.public_ip,
+        provider_capacity=ResourceCapacityResponse(
+            cpu_millicores=resource.provider_capacity_cpu_millicores,
+            memory_mib=resource.provider_capacity_memory_mib,
+            storage_mib=resource.provider_capacity_storage_mib,
+        ),
+        allocatable_capacity=allocatable,
     )
 
 
@@ -141,10 +153,12 @@ def _sync_response(outcome: SyncOutcome) -> ProviderAccountSyncResponse:
 
 
 COMMON_ERROR_RESPONSES = {
+    status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
     status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
     status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
     status.HTTP_501_NOT_IMPLEMENTED: {"model": ErrorResponse},
     status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+    status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
 }
 
 
@@ -153,8 +167,10 @@ COMMON_ERROR_RESPONSES = {
     response_model=ProviderAccountResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
         status.HTTP_409_CONFLICT: {"model": ErrorResponse},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
     },
 )
 def create_provider_account(
@@ -190,7 +206,9 @@ def create_provider_account(
     "",
     response_model=ProviderAccountListResponse,
     responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
     },
 )
 def list_provider_accounts(
@@ -298,3 +316,39 @@ def sync_provider_account(
             content=response.model_dump(mode="json"),
         )
     return response
+
+
+@router.delete(
+    "/{account_id}",
+    response_model=ProviderAccountDeleteResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+    },
+)
+def delete_provider_account(
+    account_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> ProviderAccountDeleteResponse | Response:
+    try:
+        outcome = ProviderAccountService(session).delete_account(account_id)
+    except ProviderAccountNotFoundError:
+        return _error_response(
+            status.HTTP_404_NOT_FOUND,
+            "PROVIDER_ACCOUNT_NOT_FOUND",
+            "The provider account was not found.",
+        )
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            "The provider account could not be deleted.",
+        )
+
+    return ProviderAccountDeleteResponse(
+        account_id=outcome.account_id,
+        deleted_resource_count=outcome.deleted_resource_count,
+    )

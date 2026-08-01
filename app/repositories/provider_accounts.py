@@ -2,11 +2,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session, joinedload
 
 from app.adapters.base import ProviderInstanceSummary
 from app.db.tables import ProviderAccountTable, ResourceTargetTable
+from app.domain.enums import Provider
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +15,12 @@ class ResourceSyncResult:
     created_count: int
     updated_count: int
     retired_count: int
+    resources: tuple[ResourceTargetTable, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceTargetListResult:
+    total: int
     resources: tuple[ResourceTargetTable, ...]
 
 
@@ -29,6 +36,10 @@ class ProviderAccountRepository:
     def get(self, account_id: UUID) -> ProviderAccountTable | None:
         return self._session.get(ProviderAccountTable, account_id)
 
+    def delete(self, account: ProviderAccountTable) -> None:
+        self._session.delete(account)
+        self._session.flush()
+
     def list_all(self) -> tuple[ProviderAccountTable, ...]:
         statement = select(ProviderAccountTable).order_by(
             ProviderAccountTable.created_at,
@@ -40,6 +51,62 @@ class ProviderAccountRepository:
 class ResourceTargetRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def delete_by_account_id(self, account_id: UUID) -> int:
+        statement = delete(ResourceTargetTable).where(
+            ResourceTargetTable.account_id == account_id
+        )
+        result = self._session.execute(statement)
+        self._session.flush()
+        return result.rowcount or 0
+
+    def list_all(
+        self,
+        *,
+        provider: Provider | None,
+        account_id: UUID | None,
+        include_retired: bool,
+        limit: int,
+        offset: int,
+    ) -> ResourceTargetListResult:
+        filters = []
+        if provider is not None:
+            filters.append(ProviderAccountTable.provider == provider)
+        if account_id is not None:
+            filters.append(ResourceTargetTable.account_id == account_id)
+        if not include_retired:
+            filters.append(ResourceTargetTable.retired_at.is_(None))
+
+        count_statement = (
+            select(func.count())
+            .select_from(ResourceTargetTable)
+            .join(ProviderAccountTable)
+            .where(*filters)
+        )
+        total = self._session.scalar(count_statement) or 0
+
+        statement = (
+            select(ResourceTargetTable)
+            .join(ProviderAccountTable)
+            .options(joinedload(ResourceTargetTable.account))
+            .where(*filters)
+            .order_by(
+                ProviderAccountTable.provider,
+                ProviderAccountTable.display_name,
+                ResourceTargetTable.provider_scope_id,
+                ResourceTargetTable.region,
+                ResourceTargetTable.zone,
+                ResourceTargetTable.instance_name,
+                ResourceTargetTable.resource_target_id,
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        resources = tuple(self._session.scalars(statement).all())
+        return ResourceTargetListResult(
+            total=total,
+            resources=resources,
+        )
 
     def sync_instances(
         self,
@@ -84,6 +151,25 @@ class ResourceTargetRepository:
                     public_ip=instance.external_ip,
                     region=instance.region,
                     zone=instance.zone,
+                    architecture=instance.architecture,
+                    provider_capacity_cpu_millicores=(
+                        instance.provider_capacity_cpu_millicores
+                    ),
+                    provider_capacity_memory_mib=(
+                        instance.provider_capacity_memory_mib
+                    ),
+                    provider_capacity_storage_mib=(
+                        instance.provider_capacity_storage_mib
+                    ),
+                    allocatable_cpu_millicores=(
+                        instance.provider_capacity_cpu_millicores
+                    ),
+                    allocatable_memory_mib=(
+                        instance.provider_capacity_memory_mib
+                    ),
+                    allocatable_ephemeral_storage_mib=(
+                        instance.provider_capacity_storage_mib
+                    ),
                     observed_at=observed_at,
                     last_seen_at=observed_at,
                 )
@@ -97,6 +183,20 @@ class ResourceTargetRepository:
                 resource.public_ip = instance.external_ip
                 resource.region = instance.region
                 resource.zone = instance.zone
+                if instance.architecture is not None:
+                    resource.architecture = instance.architecture
+                if instance.provider_capacity_cpu_millicores is not None:
+                    resource.provider_capacity_cpu_millicores = (
+                        instance.provider_capacity_cpu_millicores
+                    )
+                if instance.provider_capacity_memory_mib is not None:
+                    resource.provider_capacity_memory_mib = (
+                        instance.provider_capacity_memory_mib
+                    )
+                if instance.provider_capacity_storage_mib is not None:
+                    resource.provider_capacity_storage_mib = (
+                        instance.provider_capacity_storage_mib
+                    )
                 resource.observed_at = observed_at
                 resource.last_seen_at = observed_at
                 resource.retired_at = None

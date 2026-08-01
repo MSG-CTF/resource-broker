@@ -4,9 +4,7 @@ from enum import StrEnum
 class Provider(StrEnum):
     AWS = "AWS"
     GCP = "GCP"
-    OCI = "OCI"
     AZURE = "AZURE"
-    NCP = "NCP"
 
 
 class Architecture(StrEnum):
