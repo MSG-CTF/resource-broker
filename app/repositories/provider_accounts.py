@@ -161,15 +161,6 @@ class ResourceTargetRepository:
                     provider_capacity_storage_mib=(
                         instance.provider_capacity_storage_mib
                     ),
-                    allocatable_cpu_millicores=(
-                        instance.provider_capacity_cpu_millicores
-                    ),
-                    allocatable_memory_mib=(
-                        instance.provider_capacity_memory_mib
-                    ),
-                    allocatable_ephemeral_storage_mib=(
-                        instance.provider_capacity_storage_mib
-                    ),
                     observed_at=observed_at,
                     last_seen_at=observed_at,
                 )

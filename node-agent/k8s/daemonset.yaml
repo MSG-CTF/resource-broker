@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: msg-broker-node-agent
+  namespace: msg-broker-system
+  labels:
+    app.kubernetes.io/name: msg-broker-node-agent
+    app.kubernetes.io/component: runtime-observer
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: msg-broker-node-agent
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: msg-broker-node-agent
+        app.kubernetes.io/component: runtime-observer
+    spec:
+      serviceAccountName: msg-broker-node-agent
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 20
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+        - operator: Exists
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: node-agent
+          image: YOUR_DOCKERHUB_USER/msg-broker-node-agent:0.1.0
+          imagePullPolicy: Always
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: AGENT_INTERVAL_SECONDS
+              value: "300"
+            - name: AGENT_INITIAL_JITTER_SECONDS
+              value: "30"
+            - name: AGENT_DRY_RUN
+              value: "true"
+            - name: BROKER_OBSERVATIONS_URL
+              value: https://broker.example.com/v1/agent/observations
+            - name: BROKER_REQUEST_TIMEOUT_SECONDS
+              value: "15"
+            - name: RESOURCE_TARGET_ANNOTATION
+              value: msg-broker.io/resource-target-id
+            - name: BROKER_CA_FILE
+              value: /var/run/msg-broker-agent/tls/ca.crt
+            - name: BROKER_CLIENT_CERT_FILE
+              value: /var/run/msg-broker-agent/tls/client.crt
+            - name: BROKER_CLIENT_KEY_FILE
+              value: /var/run/msg-broker-agent/tls/client.key
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+              ephemeral-storage: 32Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+              ephemeral-storage: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: agent-tls
+              mountPath: /var/run/msg-broker-agent/tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: agent-tls
+          hostPath:
+            path: /etc/msg-broker-agent/tls
+            type: DirectoryOrCreate
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

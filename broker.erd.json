@@ -122,6 +122,8 @@
           "rt_allocatable_ephemeral_storage_mib",
           "rt_enabled",
           "rt_ready",
+          "rt_runtime_observed_at",
+          "rt_runtime_last_seen_at",
           "rt_observed_at",
           "rt_last_seen_at",
           "rt_retired_at",
@@ -151,6 +153,8 @@
           "rt_allocatable_ephemeral_storage_mib",
           "rt_enabled",
           "rt_ready",
+          "rt_runtime_observed_at",
+          "rt_runtime_last_seen_at",
           "rt_observed_at",
           "rt_last_seen_at",
           "rt_retired_at",
@@ -946,6 +950,46 @@
           "widthName": 60,
           "widthComment": 99,
           "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_runtime_observed_at": {
+        "id": "rt_runtime_observed_at",
+        "tableId": "t_resource_targets",
+        "name": "runtime_observed_at",
+        "comment": "Node Agent가 관측한 시각",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 117,
+          "widthComment": 139,
+          "widthDataType": 162,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_runtime_last_seen_at": {
+        "id": "rt_runtime_last_seen_at",
+        "tableId": "t_resource_targets",
+        "name": "runtime_last_seen_at",
+        "comment": "Broker가 마지막 Agent 요청을 수신한 시각",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 116,
+          "widthComment": 235,
+          "widthDataType": 162,
           "widthDefault": 60
         },
         "meta": {

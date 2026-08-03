@@ -83,6 +83,8 @@ def _resource_response(
             type=resource.runtime_type,
             target_id=resource.target_id,
             ready=resource.ready,
+            observed_at=resource.runtime_observed_at,
+            last_seen_at=resource.runtime_last_seen_at,
         ),
         enabled=resource.enabled,
         observed_at=resource.observed_at,

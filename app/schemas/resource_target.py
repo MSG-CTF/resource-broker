@@ -20,6 +20,8 @@ class ResourceRuntimeResponse(ApiSchema):
     type: RuntimeType | None
     target_id: str | None
     ready: bool
+    observed_at: datetime | None
+    last_seen_at: datetime | None
 
 
 class AdminResourceTargetResponse(ApiSchema):
