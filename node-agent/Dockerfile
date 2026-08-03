@@ -4,6 +4,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 10001 node-agent \
     && useradd --uid 10001 --gid 10001 --no-create-home node-agent
 
@@ -17,4 +21,3 @@ RUN pip install --no-cache-dir .
 USER 10001:10001
 
 ENTRYPOINT ["msg-broker-node-agent"]
-

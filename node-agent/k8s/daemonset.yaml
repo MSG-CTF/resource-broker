@@ -44,13 +44,11 @@ spec:
             - name: AGENT_DRY_RUN
               value: "true"
             - name: BROKER_OBSERVATIONS_URL
-              value: https://broker.example.com/v1/agent/observations
+              value: https://agents.mjsec.kr/v1/agent/observations
             - name: BROKER_REQUEST_TIMEOUT_SECONDS
               value: "15"
             - name: RESOURCE_TARGET_ANNOTATION
               value: msg-broker.io/resource-target-id
-            - name: BROKER_CA_FILE
-              value: /var/run/msg-broker-agent/tls/ca.crt
             - name: BROKER_CLIENT_CERT_FILE
               value: /var/run/msg-broker-agent/tls/client.crt
             - name: BROKER_CLIENT_KEY_FILE

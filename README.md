@@ -46,14 +46,22 @@ docker compose logs --tail=200 migrate
 docker compose logs --tail=200 app
 ```
 
-기본 Admin UI는 GCE의 loopback에만 열리므로 SSH tunnel로 접속한다.
+기본 Compose만 사용할 때 Admin UI는 GCE의 loopback에만 열리므로 SSH tunnel로
+접속한다.
 
 ```powershell
 gcloud compute ssh BROKER_VM --project=BROKER_PROJECT --zone=BROKER_ZONE -- -L 8080:127.0.0.1:8080
 ```
 
-브라우저에서 `http://127.0.0.1:8080`을 연다. 외부 HTTPS/mTLS ingress는 Node
-Agent 수집 API를 구현할 때 추가한다.
+브라우저에서 `http://127.0.0.1:8080`을 연다.
+
+운영 GCE에는 호스트 Nginx가 `broker.mjsec.kr`의 일반 HTTPS와
+`agents.mjsec.kr`의 Agent mTLS를 종료한다. Docker의 loopback bind는 유지하며
+Public IP나 `0.0.0.0`으로 변경하지 않는다. Gateway 설정과 Agent 인증서 절차는
+다음 문서에 있다.
+
+- `deploy/nginx/msg-broker.conf`
+- `deploy/mtls/README.md`
 
 ## 로컬 개발 실행
 

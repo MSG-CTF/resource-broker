@@ -58,15 +58,21 @@ sudo k3s kubectl -n msg-broker-system logs daemonset/msg-broker-node-agent --tai
 다음 단계에서 Broker HTTPS/mTLS gateway와 VM별 인증서를 만든 뒤 manifest를
 변경한다.
 
-- `BROKER_OBSERVATIONS_URL`: 실제 HTTPS 주소
+- `BROKER_OBSERVATIONS_URL`: `https://agents.mjsec.kr/v1/agent/observations`
 - `AGENT_DRY_RUN`: `false`
-- `/etc/msg-broker-agent/tls/ca.crt`: Broker CA
 - `/etc/msg-broker-agent/tls/client.crt`: 이 VM의 client certificate
 - `/etc/msg-broker-agent/tls/client.key`: 이 VM의 client private key
+
+Gateway 서버 인증서는 공개 Let's Encrypt 인증서이므로 Agent는 이미지의 시스템
+신뢰 저장소로 이를 검증한다. `BROKER_CA_FILE`은 자체 서명 서버 인증서를 사용할
+때만 설정하며, Agent client CA를 이 값으로 지정하면 안 된다.
 
 Bootstrap이 TLS 디렉터리와 key 소유권을 UID/GID `10001`로 준비해야 한다.
 private key는 해당 UID만 읽도록 제한한다. 인증서의 VM identity는 Node annotation의
 `resource_target_id`와 일치해야 한다.
+
+Broker 저장소의 `deploy/mtls/install-agent-certificate.sh`는 발급 bundle을
+`/etc/msg-broker-agent/tls`에 올바른 소유권과 권한으로 설치한다.
 
 ## RBAC 범위
 
