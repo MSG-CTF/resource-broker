@@ -30,7 +30,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: node-agent
-          image: YOUR_DOCKERHUB_USER/msg-broker-node-agent:0.1.0
+          image: gonas0919/msg-broker-node-agent:0.1.0
           imagePullPolicy: Always
           env:
             - name: NODE_NAME

@@ -1,9 +1,10 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.db.tables import ResourceTargetTable
+from app.db.tables import ResourceTargetTable, RuntimeContainerTable
 from app.domain.enums import Provider
 from app.repositories.provider_accounts import ResourceTargetRepository
 
@@ -12,6 +13,17 @@ from app.repositories.provider_accounts import ResourceTargetRepository
 class ResourceTargetListOutcome:
     total: int
     resources: tuple[ResourceTargetTable, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceTargetContainerListOutcome:
+    resource_target_id: UUID
+    observed_at: datetime | None
+    containers: tuple[RuntimeContainerTable, ...]
+
+
+class ResourceTargetNotFoundError(LookupError):
+    pass
 
 
 class ResourceTargetService:
@@ -37,4 +49,20 @@ class ResourceTargetService:
         return ResourceTargetListOutcome(
             total=result.total,
             resources=result.resources,
+        )
+
+    def list_containers(
+        self,
+        resource_target_id: UUID,
+    ) -> ResourceTargetContainerListOutcome:
+        resource = self._resources.get(resource_target_id)
+        if resource is None:
+            raise ResourceTargetNotFoundError
+
+        return ResourceTargetContainerListOutcome(
+            resource_target_id=resource.resource_target_id,
+            observed_at=resource.runtime_observed_at,
+            containers=self._resources.list_runtime_containers(
+                resource_target_id
+            ),
         )

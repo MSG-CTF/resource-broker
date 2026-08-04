@@ -6,7 +6,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.adapters.base import ProviderInstanceSummary
-from app.db.tables import ProviderAccountTable, ResourceTargetTable
+from app.db.tables import (
+    ProviderAccountTable,
+    ResourceTargetTable,
+    RuntimeContainerTable,
+)
 from app.domain.enums import Provider
 
 
@@ -59,6 +63,28 @@ class ResourceTargetRepository:
         result = self._session.execute(statement)
         self._session.flush()
         return result.rowcount or 0
+
+    def get(self, resource_target_id: UUID) -> ResourceTargetTable | None:
+        return self._session.get(ResourceTargetTable, resource_target_id)
+
+    def list_runtime_containers(
+        self,
+        resource_target_id: UUID,
+    ) -> tuple[RuntimeContainerTable, ...]:
+        statement = (
+            select(RuntimeContainerTable)
+            .where(
+                RuntimeContainerTable.resource_target_id
+                == resource_target_id
+            )
+            .order_by(
+                RuntimeContainerTable.namespace,
+                RuntimeContainerTable.pod_name,
+                RuntimeContainerTable.container_name,
+                RuntimeContainerTable.container_id,
+            )
+        )
+        return tuple(self._session.scalars(statement).all())
 
     def list_all(
         self,

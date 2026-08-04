@@ -424,7 +424,7 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
   backdrop-filter: blur(3px);
 }
 .resource-modal {
-  width: min(100%, 680px);
+  width: min(100%, 920px);
   max-height: min(760px, calc(100vh - 48px));
   overflow-y: auto;
   background: #fff;
@@ -490,6 +490,79 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 .resource-detail-grid div:nth-last-child(-n + 2) { border-bottom: 0; }
 .resource-detail-grid dt { margin-bottom: 6px; color: #929daf; font-size: 9px; font-weight: 800; text-transform: uppercase; }
 .resource-detail-grid dd { margin: 0; color: #3c4860; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+
+.runtime-containers {
+  margin-top: 4px;
+  overflow: hidden;
+  border: 1px solid #dfe5ed;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+.runtime-containers-header {
+  padding: 17px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: #fff;
+  border-bottom: 1px solid #e5e9ef;
+}
+.runtime-containers-header h3 {
+  margin: 3px 0 0;
+  color: #1f2c43;
+  font-size: 17px;
+  letter-spacing: -0.025em;
+}
+.runtime-containers-summary {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+.runtime-containers-summary strong { color: #1e714b; font-size: 14px; }
+.runtime-containers-summary span { color: #8b96a8; font-size: 9px; }
+.runtime-containers-state { padding: 30px 18px; color: #7b8799; text-align: center; font-size: 11px; }
+.runtime-containers-state.is-error { color: #a93d3d; background: #fff4f4; }
+.runtime-container-list { padding: 12px; display: grid; gap: 10px; }
+.runtime-container-card {
+  padding: 15px;
+  display: grid;
+  gap: 13px;
+  background: #fff;
+  border: 1px solid #e1e6ed;
+  border-radius: 11px;
+}
+.runtime-container-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.runtime-container-title > div { min-width: 0; display: grid; gap: 4px; }
+.runtime-container-title strong { color: #243149; font-size: 13px; overflow-wrap: anywhere; }
+.runtime-container-title span { color: #7b879b; font-size: 9px; overflow-wrap: anywhere; }
+.runtime-container-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid #e7ebf0;
+  border-radius: 9px;
+  overflow: hidden;
+}
+.runtime-container-metrics div { padding: 11px 12px; display: grid; gap: 4px; border-right: 1px solid #e7ebf0; }
+.runtime-container-metrics div:last-child { border-right: 0; }
+.runtime-container-metrics span { color: #8a95a7; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.runtime-container-metrics strong { color: #344158; font-size: 12px; }
+.runtime-container-meta { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.runtime-container-meta code {
+  min-width: 0;
+  padding: 0;
+  color: #6b778b;
+  background: transparent;
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-container-meta span { flex: 0 0 auto; color: #9aa3b2; font-size: 9px; }
 
 footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: space-between; color: #8a95a7; background: #e9edf1; border-top: 1px solid #dce2e8; font-size: 10px; letter-spacing: 0.04em; }
 
@@ -558,5 +631,11 @@ footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: s
   .resource-detail-grid div:nth-child(2n),
   .resource-detail-grid div:nth-last-child(-n + 2) { border-right: 0; border-bottom: 1px solid #e7ebf0; }
   .resource-detail-grid div:last-child { border-bottom: 0; }
+  .runtime-containers-header { align-items: flex-start; }
+  .runtime-container-metrics { grid-template-columns: 1fr; }
+  .runtime-container-metrics div { border-right: 0; border-bottom: 1px solid #e7ebf0; }
+  .runtime-container-metrics div:last-child { border-bottom: 0; }
+  .runtime-container-meta { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .runtime-container-meta code { width: 100%; }
   footer { padding: 20px; flex-direction: column; gap: 6px; }
 }

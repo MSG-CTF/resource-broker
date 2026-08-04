@@ -81,6 +81,13 @@ export function listResourceTargets({ provider = "" } = {}) {
   return request(`/v1/admin/resource-targets?${query.toString()}`);
 }
 
+export function listResourceTargetContainers(resourceTargetId, { signal } = {}) {
+  return request(
+    `/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/containers`,
+    { signal },
+  );
+}
+
 export function createProviderAccount(payload) {
   return request("/v1/admin/provider-accounts", {
     method: "POST",

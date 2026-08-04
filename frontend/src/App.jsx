@@ -7,6 +7,7 @@ import {
   deleteProviderAccount,
   getAdminToken,
   listProviderAccounts,
+  listResourceTargetContainers,
   listResourceTargets,
   loginAdmin,
   setAdminToken,
@@ -642,6 +643,10 @@ function ResourceInventory({
   onRefresh,
 }) {
   const [selectedResource, setSelectedResource] = useState(null);
+  const [containers, setContainers] = useState([]);
+  const [containersLoading, setContainersLoading] = useState(false);
+  const [containersError, setContainersError] = useState(null);
+  const [containersObservedAt, setContainersObservedAt] = useState(null);
 
   useEffect(() => {
     if (!selectedResource) return undefined;
@@ -654,6 +659,42 @@ function ResourceInventory({
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
+  }, [selectedResource]);
+
+  useEffect(() => {
+    if (!selectedResource) {
+      setContainers([]);
+      setContainersError(null);
+      setContainersObservedAt(null);
+      setContainersLoading(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setContainers([]);
+    setContainersError(null);
+    setContainersObservedAt(null);
+    setContainersLoading(true);
+
+    listResourceTargetContainers(selectedResource.resource_target_id, {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        setContainers(response.items);
+        setContainersObservedAt(response.observed_at);
+      })
+      .catch((requestError) => {
+        if (requestError.name !== "AbortError") {
+          setContainersError(requestError);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setContainersLoading(false);
+        }
+      });
+
+    return () => controller.abort();
   }, [selectedResource]);
 
   const selectedDefinition = selectedResource
@@ -856,6 +897,84 @@ function ResourceInventory({
                   <dd>{selectedResource.instance_id || "없음"}</dd>
                 </div>
               </dl>
+
+              <section
+                className="runtime-containers"
+                aria-labelledby="runtime-containers-title"
+              >
+                <header className="runtime-containers-header">
+                  <div>
+                    <span className="eyebrow">Runtime snapshot</span>
+                    <h3 id="runtime-containers-title">현재 컨테이너</h3>
+                  </div>
+                  <div className="runtime-containers-summary">
+                    <strong>
+                      {containersLoading ? "조회 중" : `${containers.length}개`}
+                    </strong>
+                    <span>{formatDate(containersObservedAt)}</span>
+                  </div>
+                </header>
+
+                {containersLoading ? (
+                  <div className="runtime-containers-state">
+                    컨테이너 snapshot을 불러오는 중입니다...
+                  </div>
+                ) : containersError ? (
+                  <div className="runtime-containers-state is-error" role="alert">
+                    {containersError.message}
+                  </div>
+                ) : containers.length === 0 ? (
+                  <div className="runtime-containers-state">
+                    아직 관측된 컨테이너가 없습니다.
+                  </div>
+                ) : (
+                  <div className="runtime-container-list">
+                    {containers.map((container) => (
+                      <article
+                        className="runtime-container-card"
+                        key={container.container_id}
+                      >
+                        <div className="runtime-container-title">
+                          <div>
+                            <strong>{container.container_name}</strong>
+                            <span>
+                              {container.namespace || "namespace 없음"}
+                              {container.pod_name
+                                ? ` · ${container.pod_name}`
+                                : " · Pod 없음"}
+                            </span>
+                          </div>
+                          <StatusBadge value={container.status || "UNKNOWN"} />
+                        </div>
+
+                        <div className="runtime-container-metrics">
+                          <div>
+                            <span>CPU usage</span>
+                            <strong>
+                              {formatCpu(container.cpu_usage_millicores)}
+                            </strong>
+                          </div>
+                          <div>
+                            <span>Memory usage</span>
+                            <strong>{formatMib(container.memory_usage_mib)}</strong>
+                          </div>
+                          <div>
+                            <span>Storage usage</span>
+                            <strong>{formatMib(container.storage_usage_mib)}</strong>
+                          </div>
+                        </div>
+
+                        <div className="runtime-container-meta">
+                          <code title={container.container_id}>
+                            {container.container_id}
+                          </code>
+                          <span>{formatDate(container.observed_at)}</span>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           </section>
         </div>

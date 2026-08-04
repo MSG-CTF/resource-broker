@@ -8,16 +8,21 @@ from sqlalchemy.orm import Session
 
 from app.api.admin_auth import require_admin
 from app.db.session import get_db_session
-from app.db.tables import ResourceTargetTable
+from app.db.tables import ResourceTargetTable, RuntimeContainerTable
 from app.domain.enums import Provider
 from app.schemas.provider_account import ErrorResponse
 from app.schemas.resource_target import (
     AdminResourceTargetListResponse,
     AdminResourceTargetResponse,
+    AdminRuntimeContainerListResponse,
+    AdminRuntimeContainerResponse,
     ResourceCapacityResponse,
     ResourceRuntimeResponse,
 )
-from app.services.resource_target_service import ResourceTargetService
+from app.services.resource_target_service import (
+    ResourceTargetNotFoundError,
+    ResourceTargetService,
+)
 
 
 router = APIRouter(
@@ -93,6 +98,22 @@ def _resource_response(
     )
 
 
+def _container_response(
+    container: RuntimeContainerTable,
+) -> AdminRuntimeContainerResponse:
+    return AdminRuntimeContainerResponse(
+        container_id=container.container_id,
+        container_name=container.container_name,
+        pod_name=container.pod_name,
+        namespace=container.namespace,
+        status=container.status,
+        cpu_usage_millicores=container.cpu_usage_millicores,
+        memory_usage_mib=container.memory_usage_mib,
+        storage_usage_mib=container.storage_usage_mib,
+        observed_at=container.observed_at,
+    )
+
+
 @router.get(
     "",
     response_model=AdminResourceTargetListResponse,
@@ -131,4 +152,45 @@ def list_resource_targets(
         limit=limit,
         offset=offset,
         items=[_resource_response(item) for item in outcome.resources],
+    )
+
+
+@router.get(
+    "/{resource_target_id}/containers",
+    response_model=AdminRuntimeContainerListResponse,
+    summary="List the current containers observed on a VM",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+    },
+)
+def list_resource_target_containers(
+    resource_target_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> AdminRuntimeContainerListResponse | Response:
+    try:
+        outcome = ResourceTargetService(session).list_containers(
+            resource_target_id
+        )
+    except ResourceTargetNotFoundError:
+        return _error_response(
+            status.HTTP_404_NOT_FOUND,
+            "RESOURCE_TARGET_NOT_FOUND",
+            "The resource target was not found.",
+        )
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            "The runtime container list could not be loaded.",
+        )
+
+    return AdminRuntimeContainerListResponse(
+        resource_target_id=outcome.resource_target_id,
+        observed_at=outcome.observed_at,
+        total=len(outcome.containers),
+        items=[_container_response(item) for item in outcome.containers],
     )

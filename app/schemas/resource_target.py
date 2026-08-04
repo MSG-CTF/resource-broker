@@ -54,3 +54,22 @@ class AdminResourceTargetListResponse(ApiSchema):
     limit: int = Field(gt=0)
     offset: int = Field(ge=0)
     items: list[AdminResourceTargetResponse]
+
+
+class AdminRuntimeContainerResponse(ApiSchema):
+    container_id: str
+    container_name: str
+    pod_name: str | None
+    namespace: str | None
+    status: str
+    cpu_usage_millicores: int | None = Field(default=None, ge=0)
+    memory_usage_mib: int | None = Field(default=None, ge=0)
+    storage_usage_mib: int | None = Field(default=None, ge=0)
+    observed_at: datetime
+
+
+class AdminRuntimeContainerListResponse(ApiSchema):
+    resource_target_id: UUID
+    observed_at: datetime | None
+    total: int = Field(ge=0)
+    items: list[AdminRuntimeContainerResponse]
