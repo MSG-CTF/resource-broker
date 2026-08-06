@@ -112,6 +112,11 @@ def record_agent_observation(
             pod_name=item.pod_name,
             namespace=item.namespace,
             status=item.status,
+            cpu_request_millicores=item.cpu_request_millicores,
+            memory_request_mib=item.memory_request_mib,
+            ephemeral_storage_request_mib=(
+                item.ephemeral_storage_request_mib
+            ),
             cpu_usage_millicores=item.cpu_usage_millicores,
             memory_usage_mib=item.memory_usage_mib,
             storage_usage_mib=item.storage_usage_mib,

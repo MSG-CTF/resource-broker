@@ -308,21 +308,46 @@ def _container_observations(
 
     for pod in pods:
         metadata = getattr(pod, "metadata", None)
+        pod_spec = getattr(pod, "spec", None)
         pod_status = getattr(pod, "status", None)
         pod_uid = str(getattr(metadata, "uid", "") or "")
         namespace = str(getattr(metadata, "namespace", "") or "")
         pod_name = str(getattr(metadata, "name", "") or "")
         status_groups = (
-            getattr(pod_status, "init_container_statuses", None),
-            getattr(pod_status, "container_statuses", None),
-            getattr(pod_status, "ephemeral_container_statuses", None),
+            (
+                getattr(pod_status, "init_container_statuses", None),
+                getattr(pod_spec, "init_containers", None),
+            ),
+            (
+                getattr(pod_status, "container_statuses", None),
+                getattr(pod_spec, "containers", None),
+            ),
+            (
+                getattr(pod_status, "ephemeral_container_statuses", None),
+                getattr(pod_spec, "ephemeral_containers", None),
+            ),
         )
-        for statuses in status_groups:
+        pod_phase = (getattr(pod_status, "phase", "") or "").upper()
+        pod_is_completed = pod_phase in {"SUCCEEDED", "FAILED"}
+        for statuses, container_specs in status_groups:
+            specs_by_name = {
+                container.name: container
+                for container in (container_specs or [])
+                if getattr(container, "name", None)
+            }
             for status in statuses or []:
                 container_id = str(getattr(status, "container_id", "") or "")
                 container_name = str(getattr(status, "name", "") or "")
                 if not container_id or not container_name:
                     continue
+                requests = (
+                    _ResourceVector()
+                    if pod_is_completed
+                    else _container_requests(
+                        specs_by_name.get(container_name),
+                        status,
+                    )
+                ).as_capacity(round_up=True)
                 metrics = metrics_by_uid.get((pod_uid, container_name))
                 if metrics is None:
                     metrics = metrics_by_name.get(
@@ -334,6 +359,11 @@ def _container_observations(
                     "pod_name": pod_name or None,
                     "namespace": namespace or None,
                     "status": _container_state(status),
+                    "cpu_request_millicores": requests["cpu_millicores"],
+                    "memory_request_mib": requests["memory_mib"],
+                    "ephemeral_storage_request_mib": requests[
+                        "ephemeral_storage_mib"
+                    ],
                     "cpu_usage_millicores": (
                         metrics.cpu_usage_millicores if metrics else None
                     ),

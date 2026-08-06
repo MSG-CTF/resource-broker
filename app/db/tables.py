@@ -344,6 +344,127 @@ class ResourceTargetTable(Base):
     )
 
 
+class AgentEnrollmentTokenTable(Base):
+    __tablename__ = "agent_enrollment_tokens"
+    __table_args__ = (
+        UniqueConstraint(
+            "token_hash",
+            name="uq_agent_enrollment_tokens_token_hash",
+        ),
+        Index(
+            "ix_agent_enrollment_tokens_resource_target_id",
+            "resource_target_id",
+        ),
+        Index(
+            "ix_agent_enrollment_tokens_expires_at",
+            "expires_at",
+        ),
+    )
+
+    enrollment_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    resource_target_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey(
+            "resource_targets.resource_target_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class AgentCertificateTable(Base):
+    __tablename__ = "agent_certificates"
+    __table_args__ = (
+        UniqueConstraint(
+            "issuer_fingerprint_sha256",
+            "serial_number",
+            name="uq_agent_certificates_issuer_serial",
+        ),
+        UniqueConstraint(
+            "fingerprint_sha256",
+            name="uq_agent_certificates_fingerprint_sha256",
+        ),
+        UniqueConstraint(
+            "enrollment_id",
+            name="uq_agent_certificates_enrollment_id",
+        ),
+        Index(
+            "ix_agent_certificates_resource_target_id",
+            "resource_target_id",
+        ),
+        Index("ix_agent_certificates_not_after", "not_after"),
+    )
+
+    certificate_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    resource_target_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey(
+            "resource_targets.resource_target_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    enrollment_id: Mapped[UUID | None] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey(
+            "agent_enrollment_tokens.enrollment_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    issuer_fingerprint_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    serial_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    fingerprint_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    not_before: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    not_after: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    issued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
 class RuntimeContainerTable(Base):
     __tablename__ = "runtime_containers"
     __table_args__ = (
@@ -361,6 +482,24 @@ class RuntimeContainerTable(Base):
         CheckConstraint(
             "storage_usage_mib IS NULL OR storage_usage_mib >= 0",
             name="storage_usage_non_negative",
+        ),
+        CheckConstraint(
+            (
+                "cpu_request_millicores IS NULL "
+                "OR cpu_request_millicores >= 0"
+            ),
+            name="cpu_request_non_negative",
+        ),
+        CheckConstraint(
+            "memory_request_mib IS NULL OR memory_request_mib >= 0",
+            name="memory_request_non_negative",
+        ),
+        CheckConstraint(
+            (
+                "ephemeral_storage_request_mib IS NULL "
+                "OR ephemeral_storage_request_mib >= 0"
+            ),
+            name="ephemeral_storage_request_non_negative",
         ),
     )
 
@@ -391,6 +530,18 @@ class RuntimeContainerTable(Base):
     status: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
+    )
+    cpu_request_millicores: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    memory_request_mib: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    ephemeral_storage_request_mib: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
     )
     cpu_usage_millicores: Mapped[int | None] = mapped_column(
         Integer,

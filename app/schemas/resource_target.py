@@ -62,6 +62,9 @@ class AdminRuntimeContainerResponse(ApiSchema):
     pod_name: str | None
     namespace: str | None
     status: str
+    cpu_request_millicores: int | None = Field(default=None, ge=0)
+    memory_request_mib: int | None = Field(default=None, ge=0)
+    ephemeral_storage_request_mib: int | None = Field(default=None, ge=0)
     cpu_usage_millicores: int | None = Field(default=None, ge=0)
     memory_usage_mib: int | None = Field(default=None, ge=0)
     storage_usage_mib: int | None = Field(default=None, ge=0)

@@ -107,6 +107,11 @@ def _container_response(
         pod_name=container.pod_name,
         namespace=container.namespace,
         status=container.status,
+        cpu_request_millicores=container.cpu_request_millicores,
+        memory_request_mib=container.memory_request_mib,
+        ephemeral_storage_request_mib=(
+            container.ephemeral_storage_request_mib
+        ),
         cpu_usage_millicores=container.cpu_usage_millicores,
         memory_usage_mib=container.memory_usage_mib,
         storage_usage_mib=container.storage_usage_mib,

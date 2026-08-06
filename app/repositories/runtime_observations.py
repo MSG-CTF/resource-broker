@@ -16,6 +16,9 @@ class RuntimeContainerSnapshot:
     pod_name: str | None
     namespace: str | None
     status: str
+    cpu_request_millicores: int | None
+    memory_request_mib: int | None
+    ephemeral_storage_request_mib: int | None
     cpu_usage_millicores: int | None
     memory_usage_mib: int | None
     storage_usage_mib: int | None
@@ -84,6 +87,11 @@ class RuntimeObservationRepository:
                     pod_name=snapshot.pod_name,
                     namespace=snapshot.namespace,
                     status=snapshot.status,
+                    cpu_request_millicores=snapshot.cpu_request_millicores,
+                    memory_request_mib=snapshot.memory_request_mib,
+                    ephemeral_storage_request_mib=(
+                        snapshot.ephemeral_storage_request_mib
+                    ),
                     cpu_usage_millicores=snapshot.cpu_usage_millicores,
                     memory_usage_mib=snapshot.memory_usage_mib,
                     storage_usage_mib=snapshot.storage_usage_mib,
@@ -97,6 +105,11 @@ class RuntimeObservationRepository:
             container.pod_name = snapshot.pod_name
             container.namespace = snapshot.namespace
             container.status = snapshot.status
+            container.cpu_request_millicores = snapshot.cpu_request_millicores
+            container.memory_request_mib = snapshot.memory_request_mib
+            container.ephemeral_storage_request_mib = (
+                snapshot.ephemeral_storage_request_mib
+            )
             container.cpu_usage_millicores = snapshot.cpu_usage_millicores
             container.memory_usage_mib = snapshot.memory_usage_mib
             container.storage_usage_mib = snapshot.storage_usage_mib

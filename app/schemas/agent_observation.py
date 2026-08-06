@@ -48,6 +48,13 @@ class AgentContainerObservation(ApiSchema):
     pod_name: RuntimeIdentifier | None = None
     namespace: RuntimeIdentifier | None = None
     status: ContainerStatus
+    cpu_request_millicores: int | None = Field(default=None, ge=0, strict=True)
+    memory_request_mib: int | None = Field(default=None, ge=0, strict=True)
+    ephemeral_storage_request_mib: int | None = Field(
+        default=None,
+        ge=0,
+        strict=True,
+    )
     cpu_usage_millicores: int | None = Field(default=None, ge=0, strict=True)
     memory_usage_mib: int | None = Field(default=None, ge=0, strict=True)
     storage_usage_mib: int | None = Field(default=None, ge=0, strict=True)

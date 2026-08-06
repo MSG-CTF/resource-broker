@@ -160,6 +160,7 @@ function formatDate(value) {
 
 function formatCpu(value) {
   if (value === null || value === undefined) return "미수집";
+  if (value === 0) return "0m";
   if (value % 1000 === 0) return `${value / 1000} vCPU`;
   return `${value}m`;
 }
@@ -906,6 +907,9 @@ function ResourceInventory({
                   <div>
                     <span className="eyebrow">Runtime snapshot</span>
                     <h3 id="runtime-containers-title">현재 컨테이너</h3>
+                    <p>
+                      새 워크로드 배치 판단에 사용하는 Kubernetes request입니다.
+                    </p>
                   </div>
                   <div className="runtime-containers-summary">
                     <strong>
@@ -949,18 +953,24 @@ function ResourceInventory({
 
                         <div className="runtime-container-metrics">
                           <div>
-                            <span>CPU usage</span>
+                            <span>CPU request</span>
                             <strong>
-                              {formatCpu(container.cpu_usage_millicores)}
+                              {formatCpu(container.cpu_request_millicores)}
                             </strong>
                           </div>
                           <div>
-                            <span>Memory usage</span>
-                            <strong>{formatMib(container.memory_usage_mib)}</strong>
+                            <span>Memory request</span>
+                            <strong>
+                              {formatMib(container.memory_request_mib)}
+                            </strong>
                           </div>
                           <div>
-                            <span>Storage usage</span>
-                            <strong>{formatMib(container.storage_usage_mib)}</strong>
+                            <span>Storage request</span>
+                            <strong>
+                              {formatMib(
+                                container.ephemeral_storage_request_mib,
+                              )}
+                            </strong>
                           </div>
                         </div>
 

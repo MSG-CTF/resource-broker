@@ -513,6 +513,12 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
   font-size: 17px;
   letter-spacing: -0.025em;
 }
+.runtime-containers-header p {
+  margin: 5px 0 0;
+  color: #7b879b;
+  font-size: 9px;
+  line-height: 1.5;
+}
 .runtime-containers-summary {
   display: grid;
   justify-items: end;

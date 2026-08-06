@@ -5,11 +5,16 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /srv/broker
 
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml ./
 COPY app ./app
 
 RUN pip install --no-cache-dir .
-RUN useradd --create-home --uid 10001 broker
+RUN groupadd --gid 10001 broker \
+    && useradd --create-home --uid 10001 --gid 10001 broker
 
 COPY alembic.ini ./
 COPY alembic ./alembic

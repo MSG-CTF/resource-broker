@@ -4,13 +4,19 @@
 `POST /v1/agent/observations`로 전송한다.
 
 - Node allocatable CPU, memory, ephemeral storage
-- 실행 중인 Pod의 resource requests
+- 실행 중인 Pod의 합산 resource requests
+- 컨테이너별 CPU, memory, ephemeral-storage request
 - 컨테이너 identity, 상태, 실제 CPU/memory/storage usage
 - Node UID와 Ready 상태
 
 Agent는 Kubernetes API만 사용한다. containerd socket이나 host PID/network를
 마운트하지 않는다. 실제 usage는 API server를 통한 Kubelet Summary API에서
 조회한다.
+
+운영동형 설치는 `deploy/bootstrap/node-agent-bootstrap.sh`를 사용한다. 이
+공통 Bootstrap이 Ubuntu AMD64 VM에 지정 버전 k3s를 설치하고, VM-local CSR
+enrollment, Node annotation, digest 고정 DaemonSet 적용과 실제 전송 확인까지
+수행한다. 아래 수동 절차는 개발과 장애 진단용이다.
 
 ## 이미지 빌드
 
@@ -21,7 +27,9 @@ docker build -t <DOCKERHUB_USER>/msg-broker-node-agent:0.1.0 ./node-agent
 docker push <DOCKERHUB_USER>/msg-broker-node-agent:0.1.0
 ```
 
-`k8s/daemonset.yaml`의 `image`를 같은 값으로 바꾼다.
+운영 Bootstrap에는 tag가 아니라 registry가 반환한 `sha256` digest를 전달한다.
+`k8s/daemonset.yaml`의 tag는 수동 dry-run 기본값이며 Bootstrap이 적용 전에
+digest로 렌더링한다.
 
 ## Canary k3s 노드 준비
 
