@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ApiError,
   clearAdminToken,
+  createBootstrapJob,
   createProviderAccount,
   deleteProviderAccount,
   getAdminToken,
+  listBootstrapJobs,
   listProviderAccounts,
   listResourceTargetContainers,
   listResourceTargets,
@@ -648,6 +650,15 @@ function ResourceInventory({
   const [containersLoading, setContainersLoading] = useState(false);
   const [containersError, setContainersError] = useState(null);
   const [containersObservedAt, setContainersObservedAt] = useState(null);
+  const [bootstrapJobs, setBootstrapJobs] = useState([]);
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState(null);
+  const [bootstrapAction, setBootstrapAction] = useState("INSTALL");
+  const [bootstrapVersion, setBootstrapVersion] = useState("0.1.0");
+  const [k3sVersion, setK3sVersion] = useState("");
+  const [agentImage, setAgentImage] = useState("");
+  const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
+  const [bootstrapReloadKey, setBootstrapReloadKey] = useState(0);
 
   useEffect(() => {
     if (!selectedResource) return undefined;
@@ -661,6 +672,71 @@ function ResourceInventory({
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [selectedResource]);
+
+  useEffect(() => {
+    if (!selectedResource) {
+      setBootstrapJobs([]);
+      setBootstrapError(null);
+      setBootstrapLoading(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    let timer;
+    async function loadJobs() {
+      try {
+        const response = await listBootstrapJobs(
+          selectedResource.resource_target_id,
+          { signal: controller.signal },
+        );
+        setBootstrapJobs(response.items);
+        setBootstrapError(null);
+        const active = response.items.some((job) =>
+          ["QUEUED", "APPLYING", "RUNNING"].includes(job.status),
+        );
+        if (active && !controller.signal.aborted) {
+          timer = window.setTimeout(loadJobs, 5000);
+        }
+      } catch (requestError) {
+        if (requestError.name !== "AbortError") {
+          setBootstrapError(requestError);
+        }
+      } finally {
+        if (!controller.signal.aborted) setBootstrapLoading(false);
+      }
+    }
+    setBootstrapLoading(true);
+    loadJobs();
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [selectedResource, bootstrapReloadKey]);
+
+  async function handleBootstrapSubmit(event) {
+    event.preventDefault();
+    if (!selectedResource || bootstrapSubmitting) return;
+    setBootstrapSubmitting(true);
+    setBootstrapError(null);
+    try {
+      const needsVersions = ["INSTALL", "UPDATE"].includes(bootstrapAction);
+      const created = await createBootstrapJob(
+        selectedResource.resource_target_id,
+        {
+          action: bootstrapAction,
+          bootstrap_version: bootstrapVersion,
+          k3s_version: needsVersions ? k3sVersion : null,
+          agent_image: needsVersions ? agentImage : null,
+        },
+      );
+      setBootstrapJobs((current) => [created, ...current]);
+      setBootstrapReloadKey((current) => current + 1);
+    } catch (requestError) {
+      setBootstrapError(requestError);
+    } finally {
+      setBootstrapSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     if (!selectedResource) {
@@ -898,6 +974,77 @@ function ResourceInventory({
                   <dd>{selectedResource.instance_id || "없음"}</dd>
                 </div>
               </dl>
+
+              <section className="bootstrap-jobs" aria-labelledby="bootstrap-jobs-title">
+                <header className="bootstrap-jobs-header">
+                  <div>
+                    <span className="eyebrow">Automated bootstrap</span>
+                    <h3 id="bootstrap-jobs-title">Node Agent 설치 작업</h3>
+                    <p>대상 VM에 임시 작업 라벨을 붙이고 완료 후 자동으로 제거합니다.</p>
+                  </div>
+                  <strong>{bootstrapLoading ? "조회 중" : `${bootstrapJobs.length}건`}</strong>
+                </header>
+
+                {selectedResource.provider === "GCP" ? (
+                  <form className="bootstrap-job-form" onSubmit={handleBootstrapSubmit}>
+                    <label>
+                      <span>작업</span>
+                      <select value={bootstrapAction} onChange={(event) => setBootstrapAction(event.target.value)}>
+                        <option value="INSTALL">설치</option>
+                        <option value="UPDATE">업데이트</option>
+                        <option value="CHECK">상태 확인</option>
+                        <option value="REMOVE">Agent 제거</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Bootstrap 버전</span>
+                      <input required pattern="[0-9]+\.[0-9]+\.[0-9]+" value={bootstrapVersion} onChange={(event) => setBootstrapVersion(event.target.value)} placeholder="0.1.0" />
+                    </label>
+                    {["INSTALL", "UPDATE"].includes(bootstrapAction) && (
+                      <>
+                        <label>
+                          <span>k3s 버전</span>
+                          <input required value={k3sVersion} onChange={(event) => setK3sVersion(event.target.value)} placeholder="v1.33.3+k3s1" />
+                        </label>
+                        <label className="bootstrap-image-field">
+                          <span>Node Agent image (digest 필수)</span>
+                          <input required value={agentImage} onChange={(event) => setAgentImage(event.target.value)} placeholder="registry.example/agent@sha256:..." />
+                        </label>
+                      </>
+                    )}
+                    <button
+                      className="button button-primary"
+                      type="submit"
+                      disabled={bootstrapSubmitting || bootstrapJobs.some((job) =>
+                        ["QUEUED", "APPLYING", "RUNNING"].includes(job.status),
+                      )}
+                    >
+                      {bootstrapSubmitting ? "등록 중..." : "작업 시작"}
+                    </button>
+                  </form>
+                ) : (
+                  <div className="bootstrap-job-state">
+                    {selectedResource.provider} 실행 adapter는 아직 구현되지 않았습니다.
+                  </div>
+                )}
+
+                {bootstrapError && (
+                  <div className="bootstrap-job-state is-error" role="alert">
+                    {bootstrapError.message}
+                  </div>
+                )}
+                {bootstrapJobs.length > 0 && (
+                  <div className="bootstrap-job-list">
+                    {bootstrapJobs.map((job) => (
+                      <article key={job.job_id}>
+                        <div><strong>{job.action}</strong><code>{job.job_id}</code></div>
+                        <StatusBadge value={job.status} />
+                        <span>{job.error_message || formatDate(job.created_at)}</span>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
 
               <section
                 className="runtime-containers"

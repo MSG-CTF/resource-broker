@@ -23,6 +23,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.domain.enums import (
     Architecture,
+    BootstrapAction,
+    BootstrapJobStatus,
     CredentialStatus,
     PermissionStatus,
     Provider,
@@ -341,6 +343,118 @@ class ResourceTargetTable(Base):
         back_populates="resource_target",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+
+    bootstrap_jobs: Mapped[list[BootstrapJobTable]] = relationship(
+        back_populates="resource_target",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class BootstrapJobTable(Base):
+    __tablename__ = "bootstrap_jobs"
+    __table_args__ = (
+        Index(
+            "ix_bootstrap_jobs_resource_created",
+            "resource_target_id",
+            "created_at",
+        ),
+        Index(
+            "ix_bootstrap_jobs_status_updated",
+            "status",
+            "updated_at",
+        ),
+        Index(
+            "uq_bootstrap_jobs_one_active_target",
+            "resource_target_id",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('QUEUED', 'APPLYING', 'RUNNING')"
+            ),
+        ),
+    )
+
+    job_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    resource_target_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey(
+            "resource_targets.resource_target_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    provider: Mapped[Provider] = mapped_column(
+        _enum_type(Provider, "bootstrap_job_provider"),
+        nullable=False,
+    )
+    action: Mapped[BootstrapAction] = mapped_column(
+        _enum_type(BootstrapAction, "bootstrap_action"),
+        nullable=False,
+    )
+    status: Mapped[BootstrapJobStatus] = mapped_column(
+        _enum_type(BootstrapJobStatus, "bootstrap_job_status"),
+        nullable=False,
+        default=BootstrapJobStatus.QUEUED,
+        server_default=BootstrapJobStatus.QUEUED.value,
+    )
+    bootstrap_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    k3s_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    agent_image: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    runner_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    enrollment_audience: Mapped[str] = mapped_column(
+        String(1024),
+        nullable=False,
+    )
+    provider_job_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    temporary_label_key: Mapped[str] = mapped_column(
+        String(63),
+        nullable=False,
+    )
+    temporary_label_value: Mapped[str] = mapped_column(
+        String(63),
+        nullable=False,
+    )
+    enrollment_consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    deadline_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    resource_target: Mapped[ResourceTargetTable] = relationship(
+        back_populates="bootstrap_jobs",
     )
 
 

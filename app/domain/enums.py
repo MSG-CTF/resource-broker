@@ -7,6 +7,21 @@ class Provider(StrEnum):
     AZURE = "AZURE"
 
 
+class BootstrapAction(StrEnum):
+    INSTALL = "INSTALL"
+    UPDATE = "UPDATE"
+    CHECK = "CHECK"
+    REMOVE = "REMOVE"
+
+
+class BootstrapJobStatus(StrEnum):
+    QUEUED = "QUEUED"
+    APPLYING = "APPLYING"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
 class Architecture(StrEnum):
     AMD64 = "AMD64"
     ARM64 = "ARM64"

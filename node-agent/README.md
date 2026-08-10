@@ -18,6 +18,10 @@ Agent는 Kubernetes API만 사용한다. containerd socket이나 host PID/networ
 enrollment, Node annotation, digest 고정 DaemonSet 적용과 실제 전송 확인까지
 수행한다. 아래 수동 절차는 개발과 장애 진단용이다.
 
+2026-08-10 깨끗한 GCP Ubuntu AMD64 VM에서 공통 Bootstrap을 실행해 k3s 신규
+설치, VM-local CSR enrollment, digest 고정 DaemonSet rollout과 중앙 Broker
+최초 observation 전달까지 검증했다.
+
 ## 이미지 빌드
 
 저장소 루트에서 Docker Hub 사용자 이름과 버전을 정한 뒤 실행한다.
@@ -61,10 +65,11 @@ sudo k3s kubectl -n msg-broker-system logs daemonset/msg-broker-node-agent --tai
 최초 실행은 0~30초 사이에 무작위로 분산되고 이후 주기는 300초다. 수집이나 전송
 한 번이 실패해도 Pod는 종료되지 않고 다음 주기에 다시 시도한다.
 
-## mTLS 연결 시 변경할 값
+## mTLS 운영 값
 
-다음 단계에서 Broker HTTPS/mTLS gateway와 VM별 인증서를 만든 뒤 manifest를
-변경한다.
+중앙 Broker HTTPS/mTLS Gateway와 VM별 enrollment 경로는 적용·검증됐다.
+수동 manifest를 진단 목적으로 사용할 때는 다음 값을 설정한다. 운영동형 설치는
+이 값을 직접 수정하지 않고 Bootstrap이 live manifest를 렌더링한다.
 
 - `BROKER_OBSERVATIONS_URL`: `https://agents.mjsec.kr/v1/agent/observations`
 - `AGENT_DRY_RUN`: `false`
@@ -79,8 +84,9 @@ Bootstrap이 TLS 디렉터리와 key 소유권을 UID/GID `10001`로 준비해�
 private key는 해당 UID만 읽도록 제한한다. 인증서의 VM identity는 Node annotation의
 `resource_target_id`와 일치해야 한다.
 
-Broker 저장소의 `deploy/mtls/install-agent-certificate.sh`는 발급 bundle을
-`/etc/msg-broker-agent/tls`에 올바른 소유권과 권한으로 설치한다.
+Broker 저장소의 `deploy/mtls/install-agent-certificate.sh`는 legacy 수동 발급
+bundle을 `/etc/msg-broker-agent/tls`에 설치하는 진단/호환 경로다. 신규 설치는
+VM-local private key가 밖으로 나오지 않는 Bootstrap enrollment를 사용한다.
 
 ## RBAC 범위
 

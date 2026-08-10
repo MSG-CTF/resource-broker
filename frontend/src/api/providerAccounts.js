@@ -88,6 +88,23 @@ export function listResourceTargetContainers(resourceTargetId, { signal } = {}) 
   );
 }
 
+export function listBootstrapJobs(resourceTargetId, { signal } = {}) {
+  return request(
+    `/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/bootstrap-jobs`,
+    { signal },
+  );
+}
+
+export function createBootstrapJob(resourceTargetId, payload) {
+  return request(
+    `/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/bootstrap-jobs`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export function createProviderAccount(payload) {
   return request("/v1/admin/provider-accounts", {
     method: "POST",

@@ -5,14 +5,20 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /srv/broker
 
+ARG BOOTSTRAP_VERSION=0.1.0
+
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends openssl \
+    && apt-get install --yes --no-install-recommends bash coreutils openssl tar \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
 COPY app ./app
+COPY deploy/bootstrap ./deploy/bootstrap
+COPY node-agent/k8s ./node-agent/k8s
 
 RUN pip install --no-cache-dir .
+RUN bash deploy/bootstrap/build-bundle.sh \
+      "${BOOTSTRAP_VERSION}" /srv/broker/bootstrap-artifacts
 RUN groupadd --gid 10001 broker \
     && useradd --create-home --uid 10001 --gid 10001 broker
 

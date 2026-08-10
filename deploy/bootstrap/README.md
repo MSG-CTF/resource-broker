@@ -26,6 +26,23 @@ k3s는 기본 packaged component 설정으로 설치된다. 따라서 CoreDNS, T
 ServiceLB, local-path-provisioner, metrics-server Pod가 보이는 것이 정상이다.
 Bootstrap `remove`는 Runtime이 사용할 수 있는 k3s를 제거하지 않는다.
 
+## 현재 검증 기준선
+
+2026-08-10 깨끗한 GCP Ubuntu AMD64 VM에서 version `0.1.0` bundle을 사용해
+다음을 실제로 확인했다.
+
+- 외부 bundle `.sha256`과 내부 `SHA256SUMS` 검증
+- 지정 버전 k3s 신규 설치와 systemd 기동
+- VM-local EC P-256 private key/CSR 생성
+- Admin이 발급한 VM별 1회용 token으로 certificate enrollment
+- Node `resource_target_id` annotation과 RBAC 적용
+- digest 고정 Node Agent DaemonSet rollout
+- 중앙 Broker 최초 observation 전달
+- 최종 `BOOTSTRAP_STATUS=ready`
+
+이 검증은 공통 VM-local package의 수동 Canary다. Provider별 무SSH 대량 실행은
+아직 구현되지 않았으며, 운영 VM마다 SSH/SCP를 반복하는 절차로 사용하지 않는다.
+
 ## Enrollment API
 
 ### 1. Admin이 1회용 token 발급
@@ -66,6 +83,8 @@ Success: `201 Created`
 ```
 
 token 원문은 이 응답에서 한 번만 반환한다. DB에는 SHA-256 hash만 저장한다.
+`expires_at`의 `Z`는 UTC를 뜻한다. 예를 들어 한국시간은 해당 시각에 9시간을
+더해 해석하며, 만료된 token은 다시 발급해야 한다.
 
 주요 오류:
 
@@ -150,6 +169,21 @@ sudo docker compose \
 그 다음 `deploy/nginx/msg-broker.conf`를 호스트 Nginx에 적용하고 문법 검사 후
 reload한다. Root CA private key는 Backend에 마운트하지 않는다.
 
+적용 후 인증서 없는 요청의 경로 정책은 다음처럼 확인한다.
+
+```bash
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' \
+  -X POST -H 'Content-Type: application/json' --data '{}' \
+  https://agents.mjsec.kr/v1/agent/enrollments
+
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' \
+  -X POST -H 'Content-Type: application/json' --data '{}' \
+  https://agents.mjsec.kr/v1/agent/observations
+```
+
+- enrollment의 `422`: client certificate 없이 Backend validation까지 도달
+- observation의 `401`: client certificate가 없어 차단
+
 ## Bootstrap 실행
 
 token은 root만 읽을 수 있는 임시 파일로 전달한다. 명령행 인자나 일반 로그에
@@ -169,6 +203,11 @@ sudo env \
 
 성공한 token은 다시 사용할 수 없다. 실행 후 임시 token 파일은 배포 관리면이
 제거해야 한다.
+
+```bash
+sudo rm -f /run/msg-broker-enrollment-token
+sudo bash deploy/bootstrap/node-agent-bootstrap.sh check
+```
 
 반복 실행:
 

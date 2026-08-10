@@ -63,6 +63,21 @@ Public IP나 `0.0.0.0`으로 변경하지 않는다. Gateway 설정과 Agent 인
 - `deploy/nginx/msg-broker.conf`
 - `deploy/mtls/README.md`
 
+## Node Agent Bootstrap
+
+Ubuntu AMD64 대상 VM의 운영동형 설치는
+`deploy/bootstrap/node-agent-bootstrap.sh`를 사용한다. 공통 Bootstrap은 지정
+버전 k3s 설치, VM-local CSR/1회용 token enrollment, Node annotation, digest
+고정 Agent DaemonSet rollout과 실제 Broker 전달 확인까지 수행한다.
+
+2026-08-10 깨끗한 GCP VM의 수동 Canary에서 최종
+`BOOTSTRAP_STATUS=ready`를 확인했다. 이는 공통 package 검증 완료를 뜻하며,
+Provider 관리면을 통한 약 100대 무SSH 배포가 완료됐다는 뜻은 아니다. 다음
+단계는 GCP VM Manager/OS Config 기반 Bootstrap Runner와 Admin 설치 job이다.
+
+전체 bundle/API/실행 계약은 `deploy/bootstrap/README.md`를 참고한다. 운영에서는
+개인 SSH/SCP로 VM마다 token과 bundle을 전달하지 않는다.
+
 ## 로컬 개발 실행
 
 Cloud 인증이 필요 없는 개발:

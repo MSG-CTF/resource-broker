@@ -4,6 +4,11 @@
 endpoint다. 각 대상 VM의 Node Agent는 자기 `resource_target_id`가 CN인 client
 certificate로 이 endpoint에 접속한다.
 
+2026-08-10 중앙 Broker VM에 이 구성을 적용해 인증서 없는 enrollment 요청은
+Backend validation까지 도달하고, 인증서 없는 observation 요청은 `401`로
+차단되는 것을 확인했다. 이어서 깨끗한 GCP Ubuntu AMD64 VM에서 Bootstrap이
+VM-local CSR로 certificate를 발급받아 최초 observation을 전달했다.
+
 ## 1. 중앙 Broker VM에서 Agent CA 초기화
 
 초기화 script는 legacy 수동 Root CA와 API가 사용할 별도 online enrollment CA를
@@ -68,6 +73,10 @@ curl https://agents.mjsec.kr/v1/agent/observations
 운영동형 설치는 `deploy/bootstrap/node-agent-bootstrap.sh`를 사용한다. VM에서
 private key와 CSR을 만들고 Admin이 발급한 1회용 token으로 certificate만 받는다.
 전체 API와 실행 방법은 `deploy/bootstrap/README.md`에 정리돼 있다.
+
+공통 Bootstrap의 실제 Canary 검증은 완료됐지만 token/bundle을 사람이 SSH/SCP로
+옮긴 과정은 운영 배포 방식이 아니다. 다음 단계의 Provider Bootstrap Runner가
+이 전달과 실행을 맡아야 하며 token 원문을 DB나 일반 job log에 남기면 안 된다.
 
 아래 수동 bundle 방식은 기존 Canary 진단과 이전 인증서 호환에만 사용한다.
 

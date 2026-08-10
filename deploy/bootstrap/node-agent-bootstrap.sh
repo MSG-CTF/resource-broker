@@ -9,6 +9,8 @@ RESOURCE_TARGET_ID="${MSG_BROKER_RESOURCE_TARGET_ID:-}"
 K3S_VERSION="${MSG_BROKER_K3S_VERSION:-}"
 AGENT_IMAGE="${MSG_BROKER_AGENT_IMAGE:-}"
 ENROLLMENT_TOKEN_FILE="${MSG_BROKER_ENROLLMENT_TOKEN_FILE:-}"
+ENROLLMENT_MODE="${MSG_BROKER_ENROLLMENT_MODE:-token}"
+ENROLLMENT_AUDIENCE="${MSG_BROKER_ENROLLMENT_AUDIENCE:-}"
 ENROLLMENT_URL="${MSG_BROKER_ENROLLMENT_URL:-https://agents.mjsec.kr/v1/agent/enrollments}"
 OBSERVATIONS_URL="${MSG_BROKER_OBSERVATIONS_URL:-https://agents.mjsec.kr/v1/agent/observations}"
 MANIFEST_DIR="${MSG_BROKER_MANIFEST_DIR:-${PROJECT_ROOT}/node-agent/k8s}"
@@ -52,8 +54,12 @@ Required settings for install/update:
   MSG_BROKER_K3S_VERSION=<vX.Y.Z+k3sN>
   MSG_BROKER_AGENT_IMAGE=<repository>@sha256:<64-hex-digest>
 
-Required only when no usable certificate is already installed:
+Required for token enrollment when no usable certificate is already installed:
   MSG_BROKER_ENROLLMENT_TOKEN_FILE=<root-readable-token-file>
+
+GCP automated enrollment instead uses:
+  MSG_BROKER_ENROLLMENT_MODE=gcp-identity
+  MSG_BROKER_ENROLLMENT_AUDIENCE=<exact Broker audience URL>
 EOF
 }
 
@@ -259,18 +265,40 @@ certificate_is_usable() {
 }
 
 enroll_certificate() {
-  if [[ -z "${ENROLLMENT_TOKEN_FILE}" \
-      || ! -f "${ENROLLMENT_TOKEN_FILE}" \
-      || ! -r "${ENROLLMENT_TOKEN_FILE}" ]]; then
-    fail "A readable MSG_BROKER_ENROLLMENT_TOKEN_FILE is required to enroll a certificate."
-  fi
   require_https_url "MSG_BROKER_ENROLLMENT_URL" "${ENROLLMENT_URL}"
 
   local enrollment_token
-  enrollment_token="$(tr -d '\r\n' < "${ENROLLMENT_TOKEN_FILE}")"
-  if [[ ! "${enrollment_token}" =~ ^mbe_[A-Za-z0-9_-]{40,252}$ ]]; then
-    fail "The enrollment token file does not contain a valid token."
-  fi
+  case "${ENROLLMENT_MODE}" in
+    token)
+      if [[ -z "${ENROLLMENT_TOKEN_FILE}" \
+          || ! -f "${ENROLLMENT_TOKEN_FILE}" \
+          || ! -r "${ENROLLMENT_TOKEN_FILE}" ]]; then
+        fail "A readable MSG_BROKER_ENROLLMENT_TOKEN_FILE is required to enroll a certificate."
+      fi
+      enrollment_token="$(tr -d '\r\n' < "${ENROLLMENT_TOKEN_FILE}")"
+      if [[ ! "${enrollment_token}" =~ ^mbe_[A-Za-z0-9_-]{40,252}$ ]]; then
+        fail "The enrollment token file does not contain a valid token."
+      fi
+      ;;
+    gcp-identity)
+      require_https_url "MSG_BROKER_ENROLLMENT_AUDIENCE" "${ENROLLMENT_AUDIENCE}"
+      enrollment_token="$(curl \
+        --fail \
+        --silent \
+        --show-error \
+        --get \
+        --header 'Metadata-Flavor: Google' \
+        --data-urlencode "audience=${ENROLLMENT_AUDIENCE}" \
+        --data-urlencode 'format=full' \
+        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity')"
+      if [[ -z "${enrollment_token}" ]]; then
+        fail "GCP metadata did not return an instance identity token."
+      fi
+      ;;
+    *)
+      fail "MSG_BROKER_ENROLLMENT_MODE must be token or gcp-identity."
+      ;;
+  esac
 
   WORK_DIR="$(mktemp -d)"
   chmod 0700 "${WORK_DIR}"
