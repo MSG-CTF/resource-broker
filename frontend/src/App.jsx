@@ -50,9 +50,9 @@ const PROVIDER_DEFINITIONS = {
       {
         name: "roleArn",
         configKey: "role_arn",
-        label: "Role ARN",
-        placeholder: "arn:aws:iam::123456789012:role/msg-broker-readonly",
-        help: "브로커가 AssumeRole할 읽기 전용 IAM Role입니다.",
+        label: "Spoke Role ARN",
+        placeholder: "arn:aws:iam::123456789012:role/MsgBrokerInventoryRole",
+        help: "Tooling 계정의 Hub Role이 AssumeRole할 대상 계정의 읽기 전용 IAM Role입니다.",
         kind: "text",
       },
       {
@@ -95,7 +95,7 @@ const PROVIDER_DEFINITIONS = {
 };
 
 const PROVIDER_ORDER = ["GCP", "AWS", "AZURE"];
-const ACTIVE_PROVIDERS = new Set(["GCP", "AZURE"]);
+const ACTIVE_PROVIDERS = new Set(["GCP", "AWS", "AZURE"]);
 
 const STATUS_LABELS = {
   VALID: "인증 정상",
@@ -783,7 +783,9 @@ function ResourceInventory({
       ? "Subscription ID"
       : selectedResource?.provider === "GCP"
         ? "Project ID"
-        : "Scope ID";
+        : selectedResource?.provider === "AWS"
+          ? "AWS Region"
+          : "Scope ID";
 
   return (
     <section className="panel resources-panel" aria-labelledby="inventory-title">

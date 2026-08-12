@@ -51,7 +51,7 @@ GcpBootstrapAdapterFactory = Callable[[GcpBootstrapTarget], GcpBootstrapAdapter]
 
 
 def _timeout_seconds() -> int:
-    raw = os.getenv("BOOTSTRAP_JOB_TIMEOUT_SECONDS", "1800").strip()
+    raw = os.getenv("BOOTSTRAP_JOB_TIMEOUT_SECONDS", "7200").strip()
     try:
         value = int(raw)
     except ValueError as error:
@@ -59,6 +59,24 @@ def _timeout_seconds() -> int:
     if value < 300 or value > 7200:
         raise RuntimeError(
             "BOOTSTRAP_JOB_TIMEOUT_SECONDS must be between 300 and 7200"
+        )
+    return value
+
+
+def _max_active_assignments_per_zone() -> int:
+    raw = os.getenv(
+        "BOOTSTRAP_GCP_MAX_ACTIVE_ASSIGNMENTS_PER_ZONE",
+        "10",
+    ).strip()
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise RuntimeError(
+            "BOOTSTRAP_GCP_MAX_ACTIVE_ASSIGNMENTS_PER_ZONE must be an integer"
+        ) from error
+    if value < 1 or value > 19:
+        raise RuntimeError(
+            "BOOTSTRAP_GCP_MAX_ACTIVE_ASSIGNMENTS_PER_ZONE must be between 1 and 19"
         )
     return value
 
@@ -115,6 +133,11 @@ class BootstrapJobService:
         k3s_version: str | None,
         agent_image: str | None,
     ) -> BootstrapJobTable:
+        target = self._jobs.get_resource_target(resource_target_id)
+        if target is None:
+            raise BootstrapResourceTargetNotFoundError
+        if not self._jobs.lock_provider_account(target.account_id):
+            raise BootstrapResourceTargetNotFoundError
         target = self._jobs.get_resource_target(resource_target_id)
         if target is None:
             raise BootstrapResourceTargetNotFoundError
@@ -175,8 +198,25 @@ class BootstrapJobService:
             return False
         job_id = job.job_id
         if job.status is BootstrapJobStatus.QUEUED:
+            resource = self._jobs.get_resource_target(job.resource_target_id)
+            if (
+                resource is not None
+                and resource.provider_scope_id is not None
+                and resource.zone is not None
+                and self._jobs.active_assignment_count(
+                    resource.provider_scope_id,
+                    resource.zone,
+                )
+                >= _max_active_assignments_per_zone()
+            ):
+                job.updated_at = datetime.now(UTC)
+                self._session.commit()
+                return True
+
+            now = datetime.now(UTC)
             job.status = BootstrapJobStatus.APPLYING
-            job.started_at = datetime.now(UTC)
+            job.started_at = now
+            job.deadline_at = now + timedelta(seconds=_timeout_seconds())
             job.error_code = None
             job.error_message = None
             self._session.commit()

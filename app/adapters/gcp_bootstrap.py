@@ -207,13 +207,40 @@ class GcpBootstrapAdapter:
             if isinstance(error, NotFound):
                 return None
             raise _translate_google_error(self._target.project_id, error) from error
-        state = getattr(report, "compliance_state", None)
-        state_name = getattr(state, "name", str(state)).upper()
-        if state_name.endswith("COMPLIANT") and "NON_COMPLIANT" not in state_name:
-            return True
-        if "NON_COMPLIANT" in state_name:
+        compliances = tuple(
+            getattr(report, "os_policy_compliances", None) or ()
+        )
+        if not compliances:
+            return None
+
+        state_names = tuple(
+            self._compliance_state_name(
+                getattr(compliance, "compliance_state", None)
+            )
+            for compliance in compliances
+        )
+        if any("NON_COMPLIANT" in name for name in state_names):
             return False
+        if all(
+            name.endswith("COMPLIANT") and "NON_COMPLIANT" not in name
+            for name in state_names
+        ):
+            return True
         return None
+
+    def _compliance_state_name(self, state: object) -> str:
+        name = getattr(state, "name", None)
+        if isinstance(name, str):
+            return name.upper()
+
+        try:
+            compliance_state = (
+                self._osconfig_types.OSPolicyAssignmentReport
+                .OSPolicyCompliance.ComplianceState
+            )
+            return compliance_state(state).name.upper()
+        except (AttributeError, TypeError, ValueError):
+            return str(state).upper()
 
     def delete_assignment(self, assignment_id: str) -> None:
         name = (

@@ -11,6 +11,8 @@ AWS, GCP, Azure VM inventory를 공통 snapshot으로 관리하는 Resource Brok
 - Nginx만 기본적으로 `127.0.0.1:8080`에 공개한다.
 - DB/Admin secret은 `.env`에 반드시 설정해야 한다.
 - GCE에서는 별도 JSON key 없이 attached Service Account의 metadata ADC를 쓴다.
+- AWS inventory는 같은 GCP Service Account의 Google OIDC ID Token을 AWS STS
+  Hub/Spoke Role로 교환하며 AWS Access Key를 저장하지 않는다.
 
 `compose.dev.yaml`은 로컬 개발 편의만 추가한다.
 
@@ -77,6 +79,22 @@ Provider 관리면을 통한 약 100대 무SSH 배포가 완료됐다는 뜻은 
 
 전체 bundle/API/실행 계약은 `deploy/bootstrap/README.md`를 참고한다. 운영에서는
 개인 SSH/SCP로 VM마다 token과 bundle을 전달하지 않는다.
+
+## AWS Provider
+
+AWS는 계정 하나당 Provider Account 하나를 등록하고, 명시한 Region을
+`provider_scope_id`로 사용한다. Tooling member account의 federation Hub Role이
+Organizations member account별 `MsgBrokerInventoryRole`을 Assume한다.
+
+- 인증: GCP metadata Google OIDC → STS `AssumeRoleWithWebIdentity` → STS
+  `AssumeRole`
+- 조회: EC2 instances, instance types, attached EBS volumes
+- Storage: 연결된 EBS 합계이며 instance store는 제외
+- 부분 실패: 성공한 Region만 갱신하고 실패 Region의 마지막 정상 snapshot은 보존
+
+CloudFormation 템플릿과 AWS Console 적용 순서는
+`deploy/aws/README.md`를 참고한다. Organizations management account에는 Hub
+runtime Role을 두지 않는다.
 
 ## 로컬 개발 실행
 

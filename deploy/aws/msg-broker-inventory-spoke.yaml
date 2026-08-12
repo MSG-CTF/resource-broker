@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  MSG Broker read-only EC2 inventory Spoke Role. Deploy once per AWS member
+  account with Organizations CloudFormation StackSets.
+
+Parameters:
+  HubAccountId:
+    Type: String
+    AllowedPattern: "^[0-9]{12}$"
+  HubRoleName:
+    Type: String
+    Default: MsgBrokerFederationHubRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
+  SpokeRoleName:
+    Type: String
+    Default: MsgBrokerInventoryRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
+  OrganizationId:
+    Type: String
+    AllowedPattern: "^o-[a-z0-9]{10,32}$"
+
+Resources:
+  InventorySpokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref SpokeRoleName
+      Description: Read-only EC2 inventory role assumed by the MSG Broker federation Hub Role.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TrustOnlyMsgBrokerHubRole
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${HubAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              ArnEquals:
+                "aws:PrincipalArn": !Sub "arn:${AWS::Partition}:iam::${HubAccountId}:role/${HubRoleName}"
+              StringEquals:
+                "aws:PrincipalOrgID": !Ref OrganizationId
+      Policies:
+        - PolicyName: ReadEc2Inventory
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DescribeEc2Inventory
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceTypes
+                  - ec2:DescribeVolumes
+                Resource: "*"
+      Tags:
+        - Key: ManagedBy
+          Value: MSG-Broker
+
+Outputs:
+  SpokeRoleArn:
+    Description: Register this ARN in the AWS Provider Account config.
+    Value: !GetAtt InventorySpokeRole.Arn
+

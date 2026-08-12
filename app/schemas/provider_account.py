@@ -8,6 +8,7 @@ from pydantic import (
     Field,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 
 from app.domain.enums import (
@@ -36,6 +37,27 @@ ExternalAccountId = Annotated[
 AwsAccountId = Annotated[
     str,
     StringConstraints(pattern=r"^\d{12}$", strict=True),
+]
+AwsRoleArn = Annotated[
+    str,
+    StringConstraints(
+        pattern=(
+            r"^arn:aws:iam::\d{12}:role/"
+            r"[A-Za-z0-9+=,.@_/-]+$"
+        ),
+        min_length=32,
+        max_length=2048,
+        strict=True,
+    ),
+]
+AwsRegion = Annotated[
+    str,
+    StringConstraints(
+        pattern=r"^[a-z]{2}(?:-[a-z0-9]+)+-\d+$",
+        min_length=8,
+        max_length=64,
+        strict=True,
+    ),
 ]
 AzureUuid = Annotated[
     str,
@@ -79,8 +101,8 @@ class GcpAccountConfig(ApiSchema):
 
 
 class AwsAccountConfig(ApiSchema):
-    role_arn: ProviderIdentifier
-    regions: list[ProviderIdentifier] = Field(min_length=1)
+    role_arn: AwsRoleArn
+    regions: list[AwsRegion] = Field(min_length=1)
 
     @field_validator("regions")
     @classmethod
@@ -120,6 +142,15 @@ class AwsAccountCreateRequest(ProviderAccountCreateBase):
     provider: Literal[Provider.AWS]
     external_account_id: AwsAccountId
     config: AwsAccountConfig
+
+    @model_validator(mode="after")
+    def require_role_in_external_account(self) -> "AwsAccountCreateRequest":
+        role_account_id = self.config.role_arn.split(":", maxsplit=5)[4]
+        if role_account_id != self.external_account_id:
+            raise ValueError(
+                "config.role_arn must belong to external_account_id"
+            )
+        return self
 
 
 class AzureAccountCreateRequest(ProviderAccountCreateBase):

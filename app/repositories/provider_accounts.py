@@ -37,8 +37,18 @@ class ProviderAccountRepository:
         self._session.flush()
         return account
 
-    def get(self, account_id: UUID) -> ProviderAccountTable | None:
-        return self._session.get(ProviderAccountTable, account_id)
+    def get(
+        self,
+        account_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> ProviderAccountTable | None:
+        statement = select(ProviderAccountTable).where(
+            ProviderAccountTable.account_id == account_id
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return self._session.scalar(statement)
 
     def delete(self, account: ProviderAccountTable) -> None:
         self._session.delete(account)

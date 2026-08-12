@@ -29,6 +29,7 @@ from app.services.provider_account_service import (
     DuplicateProviderAccountError,
     InvalidProviderAccountConfigError,
     ProviderAccountNotFoundError,
+    ProviderAccountHasActiveBootstrapJobsError,
     ProviderAccountService,
     ProviderNotImplementedError,
     ProviderScopeInspection,
@@ -324,6 +325,7 @@ def sync_provider_account(
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
         status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
     },
@@ -339,6 +341,12 @@ def delete_provider_account(
             status.HTTP_404_NOT_FOUND,
             "PROVIDER_ACCOUNT_NOT_FOUND",
             "The provider account was not found.",
+        )
+    except ProviderAccountHasActiveBootstrapJobsError:
+        return _error_response(
+            status.HTTP_409_CONFLICT,
+            "PROVIDER_ACCOUNT_HAS_ACTIVE_BOOTSTRAP_JOBS",
+            "The provider account has active bootstrap jobs.",
         )
     except SQLAlchemyError:
         session.rollback()

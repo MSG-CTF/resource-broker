@@ -1,0 +1,76 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  MSG Broker Google OIDC federation Hub Role for a dedicated AWS tooling
+  member account. Do not deploy this runtime role to the Organizations
+  management account.
+
+Parameters:
+  HubRoleName:
+    Type: String
+    Default: MsgBrokerFederationHubRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
+  SpokeRoleName:
+    Type: String
+    Default: MsgBrokerInventoryRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
+  OrganizationId:
+    Type: String
+    AllowedPattern: "^o-[a-z0-9]{10,32}$"
+  GoogleAudience:
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    NoEcho: false
+    Description: The aud claim requested from the GCP metadata identity endpoint.
+  GoogleAuthorizedParty:
+    Type: String
+    AllowedPattern: "^[0-9]{10,32}$"
+    NoEcho: false
+    Description: The azp claim from the Broker GCP Service Account ID token.
+  GoogleSubject:
+    Type: String
+    AllowedPattern: "^[0-9]{10,32}$"
+    NoEcho: false
+    Description: The sub claim from the Broker GCP Service Account ID token.
+
+Resources:
+  FederationHubRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref HubRoleName
+      Description: Exchanges the Broker GCP workload identity and assumes inventory Spoke Roles.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TrustOnlyBrokerGoogleIdentity
+            Effect: Allow
+            Principal:
+              Federated: accounts.google.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "accounts.google.com:aud": !Ref GoogleAuthorizedParty
+                "accounts.google.com:oaud": !Ref GoogleAudience
+                "accounts.google.com:sub": !Ref GoogleSubject
+      Policies:
+        - PolicyName: AssumeInventorySpokeRolesInOrganization
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AssumeInventorySpokes
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::*:role/${SpokeRoleName}"
+                Condition:
+                  StringEquals:
+                    "aws:ResourceOrgID": !Ref OrganizationId
+      Tags:
+        - Key: ManagedBy
+          Value: MSG-Broker
+
+Outputs:
+  HubRoleArn:
+    Description: Set this value as AWS_FEDERATION_HUB_ROLE_ARN on the Broker.
+    Value: !GetAtt FederationHubRole.Arn
+

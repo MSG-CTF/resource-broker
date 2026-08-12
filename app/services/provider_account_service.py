@@ -9,6 +9,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.base import ProviderInstanceSummary
+from app.adapters.aws import (
+    AwsAccountMismatchError,
+    AwsAdapter,
+    AwsAdapterError,
+    AwsApiUnavailableError,
+    AwsAuthenticationError,
+    AwsDependencyError,
+    AwsFederation,
+    AwsPermissionError,
+    AwsRegionNotAccessibleError,
+    AwsResourceLookupError,
+    AwsTemporaryCredentials,
+)
 from app.adapters.azure import (
     AzureAdapter,
     AzureAdapterError,
@@ -34,6 +47,7 @@ from app.domain.enums import (
     Provider,
     ProviderApiStatus,
 )
+from app.repositories.bootstrap_jobs import BootstrapJobRepository
 from app.repositories.provider_accounts import (
     ProviderAccountRepository,
     ResourceSyncResult,
@@ -42,12 +56,27 @@ from app.repositories.provider_accounts import (
 
 
 GcpAdapterFactory = Callable[[str], GcpAdapter]
+AwsFederationFactory = Callable[[str, str, str], AwsFederation]
+AwsAdapterFactory = Callable[[str, AwsTemporaryCredentials], AwsAdapter]
 AzureAdapterFactory = Callable[[str, str, str, str], AzureAdapter]
 AzureClientSecretProvider = Callable[[], str | None]
+AwsSettingProvider = Callable[[], str | None]
 
 
 def _azure_client_secret_from_environment() -> str | None:
     return os.getenv("AZURE_CLIENT_SECRET")
+
+
+def _aws_hub_role_arn_from_environment() -> str | None:
+    return os.getenv("AWS_FEDERATION_HUB_ROLE_ARN")
+
+
+def _aws_federation_audience_from_environment() -> str | None:
+    return os.getenv("AWS_FEDERATION_AUDIENCE")
+
+
+def _aws_sts_region_from_environment() -> str | None:
+    return os.getenv("AWS_STS_REGION", "us-east-1")
 
 
 class ProviderAccountNotFoundError(LookupError):
@@ -59,6 +88,10 @@ class DuplicateProviderAccountError(ValueError):
 
 
 class InvalidProviderAccountConfigError(ValueError):
+    pass
+
+
+class ProviderAccountHasActiveBootstrapJobsError(ValueError):
     pass
 
 
@@ -109,6 +142,19 @@ class ProviderAccountService:
         self,
         session: Session,
         gcp_adapter_factory: GcpAdapterFactory = GcpAdapter.from_adc,
+        aws_federation_factory: AwsFederationFactory = (
+            AwsFederation.from_google_oidc
+        ),
+        aws_adapter_factory: AwsAdapterFactory = AwsAdapter.from_credentials,
+        aws_hub_role_arn_provider: AwsSettingProvider = (
+            _aws_hub_role_arn_from_environment
+        ),
+        aws_federation_audience_provider: AwsSettingProvider = (
+            _aws_federation_audience_from_environment
+        ),
+        aws_sts_region_provider: AwsSettingProvider = (
+            _aws_sts_region_from_environment
+        ),
         azure_adapter_factory: AzureAdapterFactory = (
             AzureAdapter.from_client_secret
         ),
@@ -119,15 +165,25 @@ class ProviderAccountService:
         self._session = session
         self._accounts = ProviderAccountRepository(session)
         self._resources = ResourceTargetRepository(session)
+        self._bootstrap_jobs = BootstrapJobRepository(session)
         self._gcp_adapter_factory = gcp_adapter_factory
+        self._aws_federation_factory = aws_federation_factory
+        self._aws_adapter_factory = aws_adapter_factory
+        self._aws_hub_role_arn_provider = aws_hub_role_arn_provider
+        self._aws_federation_audience_provider = (
+            aws_federation_audience_provider
+        )
+        self._aws_sts_region_provider = aws_sts_region_provider
         self._azure_adapter_factory = azure_adapter_factory
         self._azure_client_secret_provider = azure_client_secret_provider
         self._verify_handlers = {
             Provider.GCP: self._verify_gcp,
+            Provider.AWS: self._verify_aws,
             Provider.AZURE: self._verify_azure,
         }
         self._sync_handlers = {
             Provider.GCP: self._sync_gcp,
+            Provider.AWS: self._sync_aws,
             Provider.AZURE: self._sync_azure,
         }
 
@@ -142,9 +198,11 @@ class ProviderAccountService:
     ) -> ProviderAccountTable:
         auth_method = {
             Provider.GCP: "ADC",
+            Provider.AWS: "GOOGLE_OIDC_STS",
             Provider.AZURE: "CLIENT_SECRET",
         }.get(provider, "NOT_CONFIGURED")
         credential_reference = {
+            Provider.AWS: "env://AWS_FEDERATION_HUB_ROLE_ARN",
             Provider.AZURE: "env://AZURE_CLIENT_SECRET",
         }.get(provider)
         account = ProviderAccountTable(
@@ -183,7 +241,9 @@ class ProviderAccountService:
         return handler(account)
 
     def delete_account(self, account_id: UUID) -> DeleteOutcome:
-        account = self._get_account(account_id)
+        account = self._get_account(account_id, for_update=True)
+        if self._bootstrap_jobs.has_active_for_account(account.account_id):
+            raise ProviderAccountHasActiveBootstrapJobsError
         deleted_resource_count = self._resources.delete_by_account_id(
             account.account_id
         )
@@ -279,6 +339,76 @@ class ProviderAccountService:
             scopes=inspections,
         )
 
+    def _verify_aws(
+        self,
+        account: ProviderAccountTable,
+    ) -> VerificationOutcome:
+        regions = self._aws_regions(account)
+        verified_at = datetime.now(UTC)
+        inspections, _ = self._inspect_aws_regions(account, regions)
+
+        self._apply_account_status(account, inspections)
+        account.last_verified_at = verified_at
+        self._session.commit()
+        self._session.refresh(account)
+
+        return VerificationOutcome(
+            account=account,
+            verified_at=verified_at,
+            success=all(item.success for item in inspections),
+            scopes=inspections,
+        )
+
+    def _sync_aws(self, account: ProviderAccountTable) -> SyncOutcome:
+        regions = self._aws_regions(account)
+        synced_at = datetime.now(UTC)
+        inspections, instances = self._inspect_aws_regions(account, regions)
+        success = all(item.success for item in inspections)
+        successful_regions = tuple(
+            item.provider_scope_id for item in inspections if item.success
+        )
+
+        self._apply_account_status(account, inspections)
+        account.last_verified_at = synced_at
+
+        if not successful_regions:
+            self._session.commit()
+            self._session.refresh(account)
+            return SyncOutcome(
+                account=account,
+                synced_at=synced_at,
+                success=False,
+                discovered_count=0,
+                created_count=0,
+                updated_count=0,
+                retired_count=0,
+                scopes=inspections,
+                resources=(),
+            )
+
+        sync_result = self._resources.sync_instances(
+            account_id=account.account_id,
+            scope_ids=successful_regions,
+            instances=instances,
+            observed_at=synced_at,
+        )
+        if success:
+            account.last_synced_at = synced_at
+        self._session.commit()
+        self._session.refresh(account)
+
+        return SyncOutcome(
+            account=account,
+            synced_at=synced_at,
+            success=success,
+            discovered_count=len(instances),
+            created_count=sync_result.created_count,
+            updated_count=sync_result.updated_count,
+            retired_count=sync_result.retired_count,
+            scopes=inspections,
+            resources=sync_result.resources,
+        )
+
     def _sync_azure(self, account: ProviderAccountTable) -> SyncOutcome:
         subscription_ids = self._subscription_ids(account)
         synced_at = datetime.now(UTC)
@@ -324,8 +454,13 @@ class ProviderAccountService:
             sync_result=sync_result,
         )
 
-    def _get_account(self, account_id: UUID) -> ProviderAccountTable:
-        account = self._accounts.get(account_id)
+    def _get_account(
+        self,
+        account_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> ProviderAccountTable:
+        account = self._accounts.get(account_id, for_update=for_update)
         if account is None:
             raise ProviderAccountNotFoundError
         return account
@@ -362,6 +497,42 @@ class ProviderAccountService:
         return client_id
 
     @staticmethod
+    def _aws_role_arn(account: ProviderAccountTable) -> str:
+        role_arn = account.provider_config.get("role_arn")
+        expected_prefix = f"arn:aws:iam::{account.external_account_id}:role/"
+        if (
+            not isinstance(role_arn, str)
+            or not role_arn.startswith(expected_prefix)
+            or role_arn.strip() != role_arn
+        ):
+            raise InvalidProviderAccountConfigError(
+                "The provider account has no valid AWS spoke role ARN."
+            )
+        return role_arn
+
+    @staticmethod
+    def _aws_regions(account: ProviderAccountTable) -> tuple[str, ...]:
+        raw_regions = account.provider_config.get("regions")
+        if not isinstance(raw_regions, list) or not raw_regions:
+            raise InvalidProviderAccountConfigError(
+                "The provider account has no configured AWS Regions."
+            )
+        if not all(
+            isinstance(region, str)
+            and bool(region)
+            and region.strip() == region
+            for region in raw_regions
+        ):
+            raise InvalidProviderAccountConfigError(
+                "The provider account contains an invalid AWS Region."
+            )
+        if len(raw_regions) != len(set(raw_regions)):
+            raise InvalidProviderAccountConfigError(
+                "The provider account contains duplicate AWS Regions."
+            )
+        return tuple(raw_regions)
+
+    @staticmethod
     def _subscription_ids(
         account: ProviderAccountTable,
     ) -> tuple[str, ...]:
@@ -391,6 +562,16 @@ class ProviderAccountService:
                 "The Azure client secret is not configured."
             )
         return client_secret
+
+    @staticmethod
+    def _required_aws_setting(
+        provider: AwsSettingProvider,
+        message: str,
+    ) -> str:
+        value = provider()
+        if not isinstance(value, str) or not value or value.strip() != value:
+            raise InvalidProviderAccountConfigError(message)
+        return value
 
     def _inspect_projects(
         self,
@@ -425,6 +606,84 @@ class ProviderAccountService:
                     provider_scope_id=project_id,
                     success=True,
                     vm_count=len(project_instances),
+                )
+            )
+
+        return tuple(inspections), tuple(instances)
+
+    def _inspect_aws_regions(
+        self,
+        account: ProviderAccountTable,
+        regions: tuple[str, ...],
+    ) -> tuple[
+        tuple[ProviderScopeInspection, ...],
+        tuple[ProviderInstanceSummary, ...],
+    ]:
+        hub_role_arn = self._required_aws_setting(
+            self._aws_hub_role_arn_provider,
+            "The AWS federation Hub Role ARN is not configured.",
+        )
+        audience = self._required_aws_setting(
+            self._aws_federation_audience_provider,
+            "The AWS federation audience is not configured.",
+        )
+        sts_region = self._required_aws_setting(
+            self._aws_sts_region_provider,
+            "The AWS STS Region is not configured.",
+        )
+        role_arn = self._aws_role_arn(account)
+
+        try:
+            federation = self._aws_federation_factory(
+                hub_role_arn,
+                audience,
+                sts_region,
+            )
+            credentials = federation.assume_spoke_role(
+                expected_account_id=account.external_account_id,
+                spoke_role_arn=role_arn,
+            )
+        except AwsAdapterError as error:
+            return (
+                tuple(
+                    ProviderScopeInspection(
+                        provider_scope_id=region,
+                        success=False,
+                        vm_count=0,
+                        error_code=error.error_code,
+                        message=error.public_message,
+                    )
+                    for region in regions
+                ),
+                (),
+            )
+
+        inspections: list[ProviderScopeInspection] = []
+        instances: list[ProviderInstanceSummary] = []
+        for region in regions:
+            try:
+                region_instances = self._aws_adapter_factory(
+                    region,
+                    credentials,
+                ).list_instances()
+            except AwsAdapterError as error:
+                inspections.append(
+                    ProviderScopeInspection(
+                        provider_scope_id=region,
+                        success=False,
+                        vm_count=0,
+                        error_code=error.error_code,
+                        message=error.public_message,
+                    )
+                )
+                continue
+
+            instances.extend(region_instances)
+            inspections.append(
+                ProviderScopeInspection(
+                    provider_scope_id=region,
+                    success=True,
+                    vm_count=len(region_instances),
                 )
             )
 
@@ -490,6 +749,7 @@ class ProviderAccountService:
         error_codes = {item.error_code for item in failures}
         authentication_failed = bool(
             {
+                AwsAuthenticationError.error_code,
                 GcpAuthenticationError.error_code,
                 AzureAuthenticationError.error_code,
             }
@@ -497,6 +757,9 @@ class ProviderAccountService:
         )
         permission_failed = bool(
             {
+                AwsPermissionError.error_code,
+                AwsAccountMismatchError.error_code,
+                AwsRegionNotAccessibleError.error_code,
                 GcpPermissionError.error_code,
                 GcpProjectNotFoundError.error_code,
                 AzurePermissionError.error_code,
@@ -506,6 +769,10 @@ class ProviderAccountService:
         )
         api_failed = bool(
             {
+                AwsAdapterError.error_code,
+                AwsApiUnavailableError.error_code,
+                AwsDependencyError.error_code,
+                AwsResourceLookupError.error_code,
                 GcpAdapterError.error_code,
                 GcpApiUnavailableError.error_code,
                 GcpDependencyError.error_code,
@@ -519,7 +786,11 @@ class ProviderAccountService:
         account.credential_status = (
             CredentialStatus.INVALID
             if authentication_failed
-            else CredentialStatus.VALID
+            else (
+                CredentialStatus.UNKNOWN
+                if api_failed
+                else CredentialStatus.VALID
+            )
         )
         if permission_failed:
             account.permission_status = PermissionStatus.INSUFFICIENT

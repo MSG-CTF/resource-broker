@@ -24,6 +24,12 @@ The database partial unique index permits only one active job per resource
 target. The API accepts only `INSTALL`, `UPDATE`, `CHECK`, and `REMOVE`; it
 does not accept arbitrary shell commands.
 
+The Broker limits its own active GCP assignments to 10 per project and zone by
+default, leaving headroom below the GCP quota of 20 assignments per project and
+zone. Additional jobs remain `QUEUED`. Configure this with
+`BOOTSTRAP_GCP_MAX_ACTIVE_ASSIGNMENTS_PER_ZONE` (1 through 19). The execution
+timeout starts when a queued job begins applying and defaults to 7200 seconds.
+
 ## Required deployment settings
 
 - Run the enrollment-enabled compose overlay so `AGENT_ENROLLMENT_CA_DIR` is
@@ -32,8 +38,12 @@ does not accept arbitrary shell commands.
 - Enable `osconfig.googleapis.com` and full VM Manager functionality in every
   target project. Target VMs need a running OS Config agent and an attached
   service account so the metadata identity endpoint is available.
-- The existing central Broker service account needs permission to read and set
-  VM labels, administer OS policy assignments, and read assignment reports.
+- By explicit deployment decision, the existing central Broker service account
+  is used for both inventory reads and Bootstrap execution. It needs permission
+  to read and set VM labels, administer OS policy assignments, and read
+  assignment reports. OS policy administration is equivalent to remote code
+  execution on matching VMs, so this accepted single-identity design must be
+  reflected in IAM review and audit monitoring.
   Prefer a custom Compute role containing `compute.instances.get` and
   `compute.instances.setLabels`, plus
   `roles/osconfig.osPolicyAssignmentAdmin` and

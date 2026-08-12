@@ -87,6 +87,7 @@ class CloudBootstrapEnrollmentService:
         certificate_authority: AgentCertificateAuthority | None = None,
     ) -> AgentEnrollmentOutcome:
         job = self._jobs.get(job_id, for_update=True)
+        now = datetime.now(UTC)
         if job is None:
             raise BootstrapEnrollmentUnavailableError
         if (
@@ -97,6 +98,7 @@ class CloudBootstrapEnrollmentService:
                 BootstrapJobStatus.RUNNING,
             }
             or job.enrollment_consumed_at is not None
+            or job.deadline_at <= now
         ):
             raise BootstrapEnrollmentUnavailableError
 
@@ -126,7 +128,6 @@ class CloudBootstrapEnrollmentService:
             resource_target_id=resource_target_id,
             csr_pem=csr_pem,
         )
-        now = datetime.now(UTC)
         job.enrollment_consumed_at = now
         self._enrollments.add_certificate(
             AgentCertificateTable(
