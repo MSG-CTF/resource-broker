@@ -17,7 +17,7 @@ Content-Type: application/json
 ```json
 {
   "action": "INSTALL",
-  "bootstrap_version": "0.3.0",
+  "bootstrap_version": "0.3.1",
   "k3s_version": "v1.33.3+k3s1",
   "agent_image": "repository/agent@sha256:<64-hex-digest>"
 }
@@ -80,7 +80,7 @@ managed node with an instance profile containing
 
 ## Artifact versions
 
-The Docker image builds Bootstrap `0.3.0` by default. Set the Docker build arg
+The Docker image builds Bootstrap `0.3.1` by default. Set the Docker build arg
 `BOOTSTRAP_VERSION` to publish another immutable bundle. The UI/API version must
 match an artifact present in `BOOTSTRAP_ARTIFACT_DIR`; otherwise job creation
 fails before any provider-side change.

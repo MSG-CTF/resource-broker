@@ -215,14 +215,13 @@ ensure_agent_identity() {
     if getent group msg-broker-node-agent >/dev/null; then
       fail "The msg-broker-node-agent group exists with an unexpected GID."
     fi
-    groupadd --system --gid 10001 msg-broker-node-agent
+    groupadd --gid 10001 msg-broker-node-agent
   fi
   if ! getent passwd 10001 >/dev/null; then
     if getent passwd msg-broker-node-agent >/dev/null; then
       fail "The msg-broker-node-agent user exists with an unexpected UID."
     fi
     useradd \
-      --system \
       --uid 10001 \
       --gid 10001 \
       --home-dir /nonexistent \
@@ -324,13 +323,16 @@ enroll_certificate() {
         --header "X-aws-ec2-metadata-token: ${imds_token}" \
         'http://169.254.169.254/latest/dynamic/instance-identity/document' \
         --output "${WORK_DIR}/aws-instance-identity-document"
-      aws_identity_signature="$(curl \
-        --fail \
-        --silent \
-        --show-error \
-        --max-time 5 \
-        --header "X-aws-ec2-metadata-token: ${imds_token}" \
-        'http://169.254.169.254/latest/dynamic/instance-identity/signature')"
+      aws_identity_signature="$(
+        curl \
+          --fail \
+          --silent \
+          --show-error \
+          --max-time 5 \
+          --header "X-aws-ec2-metadata-token: ${imds_token}" \
+          'http://169.254.169.254/latest/dynamic/instance-identity/signature' \
+          | tr -d '\r\n'
+      )"
       unset imds_token
       if [[ ! -s "${WORK_DIR}/aws-instance-identity-document" \
           || -z "${aws_identity_signature}" ]]; then
