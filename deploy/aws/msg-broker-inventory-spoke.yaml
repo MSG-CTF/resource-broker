@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  MSG Broker read-only EC2 inventory Spoke Role. Deploy once per AWS member
-  account with Organizations CloudFormation StackSets.
+  MSG Broker target-account roles for independent AWS accounts: read-only EC2
+  inventory, tag-restricted SSM bootstrap, and an optional SSM managed-node
+  instance profile.
 
 Parameters:
   HubAccountId:
@@ -15,16 +16,36 @@ Parameters:
     Type: String
     Default: MsgBrokerInventoryRole
     AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
-  OrganizationId:
+  BootstrapRoleName:
     Type: String
-    AllowedPattern: "^o-[a-z0-9]{10,32}$"
+    Default: MsgBrokerBootstrapRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
+  ExternalId:
+    Type: String
+    MinLength: 2
+    MaxLength: 1224
+    AllowedPattern: "^[A-Za-z0-9+=,.@:/_-]{2,1224}$"
+    NoEcho: false
+    Description: Unique non-secret value issued by the MSG Broker for this AWS account.
+  CreateManagedNodeInstanceProfile:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Create a reusable EC2 instance profile with AmazonSSMManagedInstanceCore.
+  ManagedNodeRoleName:
+    Type: String
+    Default: MsgBrokerManagedNodeRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
+
+Conditions:
+  CreateManagedNodeProfile: !Equals [!Ref CreateManagedNodeInstanceProfile, "true"]
 
 Resources:
   InventorySpokeRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Ref SpokeRoleName
-      Description: Read-only EC2 inventory role assumed by the MSG Broker federation Hub Role.
+      Description: Read-only EC2 inventory role assumed by the MSG Broker Hub Role.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -38,7 +59,7 @@ Resources:
               ArnEquals:
                 "aws:PrincipalArn": !Sub "arn:${AWS::Partition}:iam::${HubAccountId}:role/${HubRoleName}"
               StringEquals:
-                "aws:PrincipalOrgID": !Ref OrganizationId
+                "sts:ExternalId": !Ref ExternalId
       Policies:
         - PolicyName: ReadEc2Inventory
           PolicyDocument:
@@ -55,8 +76,95 @@ Resources:
         - Key: ManagedBy
           Value: MSG-Broker
 
-Outputs:
-  SpokeRoleArn:
-    Description: Register this ARN in the AWS Provider Account config.
-    Value: !GetAtt InventorySpokeRole.Arn
+  BootstrapRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref BootstrapRoleName
+      Description: Runs only the MSG Broker bootstrap runner on explicitly opted-in EC2 instances.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TrustOnlyMsgBrokerHubRole
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${HubAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              ArnEquals:
+                "aws:PrincipalArn": !Sub "arn:${AWS::Partition}:iam::${HubAccountId}:role/${HubRoleName}"
+              StringEquals:
+                "sts:ExternalId": !Ref ExternalId
+      Policies:
+        - PolicyName: RunTaggedMsgBrokerBootstrap
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: UseOnlyAwsRunShellScript
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ssm:*::document/AWS-RunShellScript"
+              - Sid: SendOnlyToOptedInInstances
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    "ssm:resourceTag/msg-broker-bootstrap": enabled
+              - Sid: ReadAndCancelOwnCommandLifecycle
+                Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                  - ssm:CancelCommand
+                  - ssm:DescribeInstanceInformation
+                Resource: "*"
+      Tags:
+        - Key: ManagedBy
+          Value: MSG-Broker
 
+  ManagedNodeRole:
+    Type: AWS::IAM::Role
+    Condition: CreateManagedNodeProfile
+    Properties:
+      RoleName: !Ref ManagedNodeRoleName
+      Description: Lets an EC2 instance register as an AWS Systems Manager managed node.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TrustEc2
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Tags:
+        - Key: ManagedBy
+          Value: MSG-Broker
+
+  ManagedNodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateManagedNodeProfile
+    Properties:
+      InstanceProfileName: !Ref ManagedNodeRoleName
+      Roles:
+        - !Ref ManagedNodeRole
+
+Outputs:
+  InventoryRoleArn:
+    Description: Read-only role used for Provider Verify and Sync.
+    Value: !GetAtt InventorySpokeRole.Arn
+  SpokeRoleArn:
+    Description: Backward-compatible alias for the Inventory Role ARN.
+    Value: !GetAtt InventorySpokeRole.Arn
+  BootstrapRoleArn:
+    Description: SSM role used only for Bootstrap jobs.
+    Value: !GetAtt BootstrapRole.Arn
+  ExternalId:
+    Description: The Broker-issued External ID enforced by both target roles.
+    Value: !Ref ExternalId
+  ManagedNodeInstanceProfileName:
+    Condition: CreateManagedNodeProfile
+    Description: Attach this instance profile to EC2 instances that have no SSM profile.
+    Value: !Ref ManagedNodeInstanceProfile

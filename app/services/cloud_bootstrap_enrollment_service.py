@@ -20,6 +20,11 @@ from app.services.agent_enrollment_service import (
     ResourceTargetNotFoundError,
     RetiredResourceTargetError,
 )
+from app.services.aws_instance_identity import (
+    AwsInstanceIdentity,
+    InvalidAwsInstanceIdentityError,
+    verify_aws_instance_identity,
+)
 
 
 class InvalidCloudIdentityError(ValueError):
@@ -35,6 +40,7 @@ class BootstrapEnrollmentUnavailableError(ValueError):
 
 
 CloudTokenVerifier = Callable[[str, str], Mapping[str, Any]]
+AwsIdentityVerifier = Callable[[str, str], AwsInstanceIdentity]
 
 
 def verify_gcp_identity_token(token: str, audience: str) -> Mapping[str, Any]:
@@ -71,19 +77,23 @@ class CloudBootstrapEnrollmentService:
         self,
         session: Session,
         token_verifier: CloudTokenVerifier = verify_gcp_identity_token,
+        aws_identity_verifier: AwsIdentityVerifier = verify_aws_instance_identity,
     ) -> None:
         self._session = session
         self._jobs = BootstrapJobRepository(session)
         self._enrollments = AgentEnrollmentRepository(session)
         self._token_verifier = token_verifier
+        self._aws_identity_verifier = aws_identity_verifier
 
     def enroll(
         self,
         *,
         job_id: UUID,
-        token: str,
+        token: str | None,
         resource_target_id: UUID,
         csr_pem: str,
+        aws_instance_identity_document: str | None = None,
+        aws_instance_identity_signature: str | None = None,
         certificate_authority: AgentCertificateAuthority | None = None,
     ) -> AgentEnrollmentOutcome:
         job = self._jobs.get(job_id, for_update=True)
@@ -91,8 +101,7 @@ class CloudBootstrapEnrollmentService:
         if job is None:
             raise BootstrapEnrollmentUnavailableError
         if (
-            job.provider is not Provider.GCP
-            or job.resource_target_id != resource_target_id
+            job.resource_target_id != resource_target_id
             or job.status not in {
                 BootstrapJobStatus.APPLYING,
                 BootstrapJobStatus.RUNNING,
@@ -102,26 +111,56 @@ class CloudBootstrapEnrollmentService:
         ):
             raise BootstrapEnrollmentUnavailableError
 
-        try:
-            claims = self._token_verifier(token, job.enrollment_audience)
-        except InvalidCloudIdentityError:
-            raise
-        except Exception as error:
-            raise InvalidCloudIdentityError from error
-        compute = _compute_claims(claims)
         resource = self._enrollments.get_resource_target(resource_target_id)
         if resource is None:
             raise ResourceTargetNotFoundError
         if resource.retired_at is not None:
             raise RetiredResourceTargetError
 
-        claim_zone = str(compute.get("zone", "")).rsplit("/", maxsplit=1)[-1]
-        if (
-            str(compute.get("project_id", "")) != resource.provider_scope_id
-            or str(compute.get("instance_id", "")) != resource.provider_instance_id
-            or claim_zone != resource.zone
-        ):
-            raise CloudIdentityTargetMismatchError
+        if job.provider is Provider.GCP:
+            if token is None:
+                raise InvalidCloudIdentityError
+            try:
+                claims = self._token_verifier(token, job.enrollment_audience)
+            except InvalidCloudIdentityError:
+                raise
+            except Exception as error:
+                raise InvalidCloudIdentityError from error
+            compute = _compute_claims(claims)
+            claim_zone = str(compute.get("zone", "")).rsplit(
+                "/", maxsplit=1
+            )[-1]
+            if (
+                str(compute.get("project_id", ""))
+                != resource.provider_scope_id
+                or str(compute.get("instance_id", ""))
+                != resource.provider_instance_id
+                or claim_zone != resource.zone
+            ):
+                raise CloudIdentityTargetMismatchError
+        elif job.provider is Provider.AWS:
+            if (
+                aws_instance_identity_document is None
+                or aws_instance_identity_signature is None
+            ):
+                raise InvalidCloudIdentityError
+            try:
+                identity = self._aws_identity_verifier(
+                    aws_instance_identity_document,
+                    aws_instance_identity_signature,
+                )
+            except InvalidAwsInstanceIdentityError as error:
+                raise InvalidCloudIdentityError from error
+            except Exception as error:
+                raise InvalidCloudIdentityError from error
+            if (
+                identity.account_id != resource.account.external_account_id
+                or identity.region != resource.provider_scope_id
+                or identity.instance_id != resource.provider_instance_id
+            ):
+                raise CloudIdentityTargetMismatchError
+        else:
+            raise BootstrapEnrollmentUnavailableError
 
         authority = certificate_authority or AgentCertificateAuthority.from_environment()
         issued = authority.issue(

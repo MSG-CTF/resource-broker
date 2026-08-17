@@ -1,12 +1,12 @@
 # MSG Broker Node Agent Bootstrap
 
-이 디렉터리의 공통 Bootstrap은 Ubuntu AMD64 VM 하나를 다음 desired state로
+이 디렉터리의 공통 Bootstrap은 Ubuntu AMD64/ARM64 VM 하나를 다음 desired state로
 맞춘다.
 
 1. 지정한 버전의 single-node k3s 설치 또는 갱신
 2. UID/GID `10001` 준비
 3. VM 내부에서 EC P-256 private key와 CSR 생성
-4. 1회용 enrollment token으로 Agent client certificate 발급
+4. 수동 1회용 token 또는 Provider VM identity로 Agent client certificate 발급
 5. Kubernetes Node에 Broker `resource_target_id` annotation 설정
 6. RBAC과 digest 고정 Node Agent DaemonSet 적용
 7. 실제 Broker observation 전송 확인
@@ -18,9 +18,14 @@ VM 내부 설치 동작은 이 스크립트 하나를 공통으로 사용한다.
 
 - Ubuntu Linux
 - AMD64 (`x86_64`)
+- ARM64 (`aarch64`, `arm64`)
 - VM마다 독립된 single-node k3s
 - systemd
 - Docker Hub 또는 OCI registry의 digest 고정 Agent image
+
+`INSTALL`과 `UPDATE`에 전달하는 Agent image는 `linux/amd64`와 `linux/arm64`를
+모두 포함한 OCI image index의 digest여야 한다. 특정 아키텍처 manifest의 digest를
+전달하면 다른 아키텍처 VM에서 image pull 또는 `exec format error`로 실패한다.
 
 k3s는 기본 packaged component 설정으로 설치된다. 따라서 CoreDNS, Traefik,
 ServiceLB, local-path-provisioner, metrics-server Pod가 보이는 것이 정상이다.
@@ -40,8 +45,9 @@ Bootstrap `remove`는 Runtime이 사용할 수 있는 k3s를 제거하지 않는
 - 중앙 Broker 최초 observation 전달
 - 최종 `BOOTSTRAP_STATUS=ready`
 
-이 검증은 공통 VM-local package의 수동 Canary다. Provider별 무SSH 대량 실행은
-아직 구현되지 않았으며, 운영 VM마다 SSH/SCP를 반복하는 절차로 사용하지 않는다.
+이 검증은 공통 VM-local package의 수동 Canary다. 현재 GCP OS Policy와 AWS SSM
+Run Command 무SSH 실행 adapter가 같은 package를 사용한다. Azure VM Run Command는
+아직 구현되지 않았다.
 
 ## Enrollment API
 
@@ -148,6 +154,20 @@ CSR은 정확한 `resource_target_id` CN과 EC P-256 public key만 허용한다.
 extension은 복사하지 않는다. private key는 VM의 `${TLS_DIR:-/etc/msg-broker-agent/tls}`
 밖으로 나오지 않는다.
 
+### Provider 자동화 enrollment
+
+Provider Bootstrap job은 별도 공개 경로를 사용한다.
+
+- `POST /v1/agent/bootstrap-enrollments/{job_id}`
+- GCP: 정확한 audience로 발급된 VM identity JWT를 Bearer header로 제출
+- AWS: IMDSv2의 instance identity document와 base64 RSA signature를 request
+  body에 제출하며 Bearer token은 사용하지 않음
+
+두 방식 모두 job이 `APPLYING` 또는 `RUNNING`이고 deadline 전이며 아직 한 번도
+소비되지 않았을 때만 인증서를 발급한다. GCP는 project/instance/zone을, AWS는
+AWS 공개키 서명과 account/Region/instance ID를 DB resource target과 비교한다.
+private key는 VM에서 생성되고 밖으로 나오지 않는다.
+
 ## 중앙 Broker 준비
 
 테스트/운영 환경별 Agent Root CA를 초기화한다. 기존 Root CA가 있으면 보존하고
@@ -231,9 +251,9 @@ sudo bash deploy/bootstrap/node-agent-bootstrap.sh remove
 Provider 관리면에 전달할 버전 고정 bundle과 checksum을 만든다.
 
 ```bash
-bash deploy/bootstrap/build-bundle.sh 0.1.0
+bash deploy/bootstrap/build-bundle.sh 0.3.0
 ```
 
-생성되는 `dist/*.tar.gz`와 `.sha256`은 artifact 저장소에 올린다. AWS SSM,
-Azure Managed Run Command, GCP OS Policy는 checksum 검증 후 같은 bundle의
-스크립트를 실행해야 한다. 개인 SSH/SCP는 운영 배포 경로가 아니다.
+생성되는 `dist/*.tar.gz`와 `.sha256`은 artifact 저장소에 올린다. 현재 AWS SSM과
+GCP OS Policy가 checksum 검증 후 같은 bundle을 실행한다. Azure Managed Run
+Command도 같은 계약으로 추가해야 한다. 개인 SSH/SCP는 운영 배포 경로가 아니다.

@@ -50,10 +50,19 @@ const PROVIDER_DEFINITIONS = {
       {
         name: "roleArn",
         configKey: "role_arn",
-        label: "Spoke Role ARN",
+        label: "Inventory Role ARN",
         placeholder: "arn:aws:iam::123456789012:role/MsgBrokerInventoryRole",
-        help: "Tooling 계정의 Hub Role이 AssumeRole할 대상 계정의 읽기 전용 IAM Role입니다.",
+        help: "Hub Role이 AssumeRole할 대상 계정의 EC2 조회 전용 IAM Role입니다.",
         kind: "text",
+      },
+      {
+        name: "bootstrapRoleArn",
+        configKey: "bootstrap_role_arn",
+        label: "Bootstrap Role ARN (선택)",
+        placeholder: "arn:aws:iam::123456789012:role/MsgBrokerBootstrapRole",
+        help: "비우면 계정 ID의 MsgBrokerBootstrapRole ARN을 자동으로 사용합니다.",
+        kind: "text",
+        required: false,
       },
       {
         name: "regions",
@@ -128,14 +137,14 @@ function splitList(value) {
 }
 
 function buildProviderConfig(provider, configValues) {
-  return Object.fromEntries(
-    PROVIDER_DEFINITIONS[provider].configFields.map((field) => [
-      field.configKey,
-      field.kind === "list"
-        ? splitList(configValues[field.name] || "")
-        : (configValues[field.name] || "").trim(),
-    ]),
-  );
+  const entries = PROVIDER_DEFINITIONS[provider].configFields.flatMap((field) => {
+    const value = field.kind === "list"
+      ? splitList(configValues[field.name] || "")
+      : (configValues[field.name] || "").trim();
+    if (field.required === false && !value) return [];
+    return [[field.configKey, value]];
+  });
+  return Object.fromEntries(entries);
 }
 
 function accountScopes(account) {
@@ -446,7 +455,7 @@ function RegisterForm({ onCreated }) {
                 onChange={updateConfigField}
                 placeholder={field.placeholder}
                 rows="3"
-                required
+                required={field.required !== false}
               />
             ) : (
               <input
@@ -455,7 +464,7 @@ function RegisterForm({ onCreated }) {
                 value={form.configValues[field.name] || ""}
                 onChange={updateConfigField}
                 placeholder={field.placeholder}
-                required
+                required={field.required !== false}
               />
             )}
             <small>{field.help}</small>
@@ -533,6 +542,15 @@ function AccountTable({
                       </strong>
                       <span>{account.external_account_id}</span>
                       <span className="provider-name">{definition.label}</span>
+                      {account.provider === "AWS" && (
+                        <details className="aws-onboarding-values">
+                          <summary>AWS 연결 값</summary>
+                          <span>External ID</span>
+                          <code>{account.config?.external_id}</code>
+                          <span>Bootstrap Role</span>
+                          <code>{account.config?.bootstrap_role_arn}</code>
+                        </details>
+                      )}
                       {!account.enabled && <em>사용 중지</em>}
                     </div>
                   </div>
@@ -654,7 +672,7 @@ function ResourceInventory({
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapError, setBootstrapError] = useState(null);
   const [bootstrapAction, setBootstrapAction] = useState("INSTALL");
-  const [bootstrapVersion, setBootstrapVersion] = useState("0.1.0");
+  const [bootstrapVersion, setBootstrapVersion] = useState("0.3.0");
   const [k3sVersion, setK3sVersion] = useState("");
   const [agentImage, setAgentImage] = useState("");
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
@@ -982,12 +1000,18 @@ function ResourceInventory({
                   <div>
                     <span className="eyebrow">Automated bootstrap</span>
                     <h3 id="bootstrap-jobs-title">Node Agent 설치 작업</h3>
-                    <p>대상 VM에 임시 작업 라벨을 붙이고 완료 후 자동으로 제거합니다.</p>
+                    <p>
+                      {selectedResource.provider === "GCP"
+                        ? "Ubuntu AMD64/ARM64 VM에 임시 작업 라벨과 OS Policy를 만들고 완료 후 자동 제거합니다."
+                        : selectedResource.provider === "AWS"
+                          ? "SSM online 상태이며 msg-broker-bootstrap=enabled 태그가 있는 Ubuntu AMD64/ARM64 EC2에서 실행됩니다."
+                          : "현재 공통 Bootstrap은 Ubuntu AMD64/ARM64를 지원합니다."}
+                    </p>
                   </div>
                   <strong>{bootstrapLoading ? "조회 중" : `${bootstrapJobs.length}건`}</strong>
                 </header>
 
-                {selectedResource.provider === "GCP" ? (
+                {["GCP", "AWS"].includes(selectedResource.provider) ? (
                   <form className="bootstrap-job-form" onSubmit={handleBootstrapSubmit}>
                     <label>
                       <span>작업</span>
@@ -1000,7 +1024,7 @@ function ResourceInventory({
                     </label>
                     <label>
                       <span>Bootstrap 버전</span>
-                      <input required pattern="[0-9]+\.[0-9]+\.[0-9]+" value={bootstrapVersion} onChange={(event) => setBootstrapVersion(event.target.value)} placeholder="0.1.0" />
+                      <input required pattern="[0-9]+\.[0-9]+\.[0-9]+" value={bootstrapVersion} onChange={(event) => setBootstrapVersion(event.target.value)} placeholder="0.3.0" />
                     </label>
                     {["INSTALL", "UPDATE"].includes(bootstrapAction) && (
                       <>
@@ -1009,7 +1033,7 @@ function ResourceInventory({
                           <input required value={k3sVersion} onChange={(event) => setK3sVersion(event.target.value)} placeholder="v1.33.3+k3s1" />
                         </label>
                         <label className="bootstrap-image-field">
-                          <span>Node Agent image (digest 필수)</span>
+                          <span>Node Agent image (멀티아키텍처 digest 필수)</span>
                           <input required value={agentImage} onChange={(event) => setAgentImage(event.target.value)} placeholder="registry.example/agent@sha256:..." />
                         </label>
                       </>

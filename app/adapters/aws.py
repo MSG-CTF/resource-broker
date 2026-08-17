@@ -330,12 +330,18 @@ class AwsFederation:
         *,
         expected_account_id: str,
         spoke_role_arn: str,
+        external_id: str | None = None,
     ) -> AwsTemporaryCredentials:
         account_id = _require_non_empty_string(
             "expected_account_id",
             expected_account_id,
         )
         role_arn = _require_non_empty_string("spoke_role_arn", spoke_role_arn)
+        normalized_external_id = (
+            _require_non_empty_string("external_id", external_id)
+            if external_id is not None
+            else None
+        )
         try:
             id_token = self._id_token_provider(self._audience)
         except AwsAdapterError:
@@ -365,10 +371,17 @@ class AwsFederation:
                 **hub_credentials.client_kwargs(),
                 **self._signed_client_options,
             )
+            assume_role_request: dict[str, object] = {
+                "RoleArn": role_arn,
+                "RoleSessionName": (
+                    f"msg-broker-{account_id}-{uuid4().hex[:8]}"
+                ),
+                "DurationSeconds": 3600,
+            }
+            if normalized_external_id is not None:
+                assume_role_request["ExternalId"] = normalized_external_id
             spoke_response = hub_sts.assume_role(
-                RoleArn=role_arn,
-                RoleSessionName=f"msg-broker-{account_id}-{uuid4().hex[:8]}",
-                DurationSeconds=3600,
+                **assume_role_request,
             )
             spoke_credentials = AwsTemporaryCredentials.from_response(
                 account_id,

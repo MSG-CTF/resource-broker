@@ -510,6 +510,10 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 .bootstrap-job-list article strong { color: #26344d; font-size: 11px; }
 .bootstrap-job-list article code { overflow: hidden; color: #7f899a; font-size: 8px; text-overflow: ellipsis; }
 .bootstrap-job-list article > span:last-child { grid-column: 1 / -1; color: #8b95a6; font-size: 9px; }
+.aws-onboarding-values { margin-top: 6px; max-width: 290px; }
+.aws-onboarding-values summary { cursor: pointer; color: #315ca8; font-size: 9px; font-weight: 800; }
+.aws-onboarding-values > span { display: block; margin-top: 5px; color: #7b879b; font-size: 8px; }
+.aws-onboarding-values > code { display: block; overflow-wrap: anywhere; color: #34445f; font-size: 8px; white-space: normal; }
 
 .runtime-containers {
   margin-top: 4px;

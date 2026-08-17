@@ -5,7 +5,7 @@ from pathlib import Path
 import shlex
 from uuid import UUID
 
-from app.domain.enums import BootstrapAction
+from app.domain.enums import BootstrapAction, Provider
 
 
 class BootstrapArtifactNotFoundError(LookupError):
@@ -77,6 +77,7 @@ def render_runner_script(
     *,
     job_id: UUID,
     resource_target_id: UUID,
+    provider: Provider = Provider.GCP,
     action: BootstrapAction,
     bootstrap_version: str,
     artifact_url: str,
@@ -86,6 +87,15 @@ def render_runner_script(
     k3s_version: str | None,
     agent_image: str | None,
 ) -> str:
+    enrollment_mode = {
+        Provider.GCP: "gcp-identity",
+        Provider.AWS: "aws-instance-identity",
+    }.get(provider)
+    if enrollment_mode is None:
+        raise BootstrapConfigurationError(
+            f"Bootstrap runner is not implemented for {provider.value}."
+        )
+    success_exit_code = "100" if provider is Provider.GCP else "0"
     values = {
         "JOB_ID": str(job_id),
         "RESOURCE_TARGET_ID": str(resource_target_id),
@@ -124,14 +134,14 @@ test -x "${{SCRIPT}}"
 MSG_BROKER_RESOURCE_TARGET_ID="${{RESOURCE_TARGET_ID}}" \
 MSG_BROKER_K3S_VERSION="${{K3S_VERSION}}" \
 MSG_BROKER_AGENT_IMAGE="${{AGENT_IMAGE}}" \
-MSG_BROKER_ENROLLMENT_MODE=gcp-identity \
+MSG_BROKER_ENROLLMENT_MODE={enrollment_mode} \
 MSG_BROKER_ENROLLMENT_URL="${{ENROLLMENT_URL}}" \
 MSG_BROKER_ENROLLMENT_AUDIENCE="${{ENROLLMENT_AUDIENCE}}" \
   bash "${{SCRIPT}}" "${{ACTION}}"
 install -d -o root -g root -m 0700 "${{MARKER_DIR}}"
 printf '%s\n' "${{ACTION}}" > "${{MARKER_DIR}}/${{JOB_ID}}.done"
 chmod 0600 "${{MARKER_DIR}}/${{JOB_ID}}.done"
-exit 100
+exit {success_exit_code}
 """
 
 

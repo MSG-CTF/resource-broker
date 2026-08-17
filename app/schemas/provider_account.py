@@ -59,6 +59,15 @@ AwsRegion = Annotated[
         strict=True,
     ),
 ]
+AwsExternalId = Annotated[
+    str,
+    StringConstraints(
+        pattern=r"^[A-Za-z0-9+=,.@:/_-]{2,1224}$",
+        min_length=2,
+        max_length=1224,
+        strict=True,
+    ),
+]
 AzureUuid = Annotated[
     str,
     StringConstraints(
@@ -100,14 +109,19 @@ class GcpAccountConfig(ApiSchema):
         return _require_unique_values("project_ids", value)
 
 
-class AwsAccountConfig(ApiSchema):
+class AwsAccountCreateConfig(ApiSchema):
     role_arn: AwsRoleArn
+    bootstrap_role_arn: AwsRoleArn | None = None
     regions: list[AwsRegion] = Field(min_length=1)
 
     @field_validator("regions")
     @classmethod
     def require_unique_regions(cls, value: list[str]) -> list[str]:
         return _require_unique_values("regions", value)
+
+
+class AwsAccountConfig(AwsAccountCreateConfig):
+    external_id: AwsExternalId
 
 
 class AzureAccountConfig(ApiSchema):
@@ -141,7 +155,7 @@ class GcpAccountCreateRequest(ProviderAccountCreateBase):
 class AwsAccountCreateRequest(ProviderAccountCreateBase):
     provider: Literal[Provider.AWS]
     external_account_id: AwsAccountId
-    config: AwsAccountConfig
+    config: AwsAccountCreateConfig
 
     @model_validator(mode="after")
     def require_role_in_external_account(self) -> "AwsAccountCreateRequest":
@@ -150,6 +164,14 @@ class AwsAccountCreateRequest(ProviderAccountCreateBase):
             raise ValueError(
                 "config.role_arn must belong to external_account_id"
             )
+        if self.config.bootstrap_role_arn is not None:
+            bootstrap_role_account_id = self.config.bootstrap_role_arn.split(
+                ":", maxsplit=5
+            )[4]
+            if bootstrap_role_account_id != self.external_account_id:
+                raise ValueError(
+                    "config.bootstrap_role_arn must belong to external_account_id"
+                )
         return self
 
 

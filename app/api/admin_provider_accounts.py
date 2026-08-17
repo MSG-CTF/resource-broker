@@ -62,12 +62,18 @@ ACCOUNT_RESPONSE_MODELS = {
 
 def _account_response(account: ProviderAccountTable) -> ProviderAccountResponse:
     response_model = ACCOUNT_RESPONSE_MODELS[account.provider]
+    config = dict(account.provider_config)
+    if account.provider is Provider.AWS:
+        config["external_id"] = ProviderAccountService.aws_external_id(account)
+        config["bootstrap_role_arn"] = (
+            ProviderAccountService.aws_bootstrap_role_arn(account)
+        )
     return response_model(
         account_id=account.account_id,
         provider=account.provider,
         external_account_id=account.external_account_id,
         display_name=account.display_name,
-        config=account.provider_config,
+        config=config,
         auth_method=account.auth_method,
         enabled=account.enabled,
         credential_status=account.credential_status,

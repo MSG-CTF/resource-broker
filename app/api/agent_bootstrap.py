@@ -1,4 +1,5 @@
 import re
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
@@ -6,6 +7,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db_session
+from app.domain.enums import BootstrapJobStatus
 from app.services.bootstrap_artifacts import (
     BootstrapArtifactNotFoundError,
     artifact_for_version,
@@ -57,6 +59,12 @@ def download_bootstrap_runner(
 ) -> PlainTextResponse | Response:
     try:
         job = BootstrapJobService(session).get(job_id)
+        if (
+            job.status
+            not in {BootstrapJobStatus.APPLYING, BootstrapJobStatus.RUNNING}
+            or job.deadline_at <= datetime.now(UTC)
+        ):
+            return Response(status_code=404)
         script = render_job_runner(job)
     except (BootstrapResourceTargetNotFoundError, BootstrapArtifactNotFoundError):
         return Response(status_code=404)

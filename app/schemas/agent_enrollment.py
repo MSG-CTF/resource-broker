@@ -48,6 +48,17 @@ class AgentEnrollmentTokenResponse(ApiSchema):
 class AgentEnrollmentRequest(ApiSchema):
     resource_target_id: UUID
     certificate_signing_request_pem: CertificateSigningRequestPem
+    aws_instance_identity_document: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=4096,
+    )
+    aws_instance_identity_signature: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=4096,
+        pattern=r"^[A-Za-z0-9+/=]+$",
+    )
 
 
 class AgentEnrollmentResponse(ApiSchema):

@@ -14,7 +14,7 @@ Agent는 Kubernetes API만 사용한다. containerd socket이나 host PID/networ
 조회한다.
 
 운영동형 설치는 `deploy/bootstrap/node-agent-bootstrap.sh`를 사용한다. 이
-공통 Bootstrap이 Ubuntu AMD64 VM에 지정 버전 k3s를 설치하고, VM-local CSR
+공통 Bootstrap이 Ubuntu AMD64/ARM64 VM에 지정 버전 k3s를 설치하고, VM-local CSR
 enrollment, Node annotation, digest 고정 DaemonSet 적용과 실제 전송 확인까지
 수행한다. 아래 수동 절차는 개발과 장애 진단용이다.
 
@@ -24,14 +24,24 @@ enrollment, Node annotation, digest 고정 DaemonSet 적용과 실제 전송 확
 
 ## 이미지 빌드
 
-저장소 루트에서 Docker Hub 사용자 이름과 버전을 정한 뒤 실행한다.
+저장소 루트에서 Docker Hub 사용자 이름과 버전을 정한 뒤 Buildx로 AMD64와
+ARM64 이미지를 하나의 multi-platform image index로 배포한다.
 
 ```bash
-docker build -t <DOCKERHUB_USER>/msg-broker-node-agent:0.1.0 ./node-agent
-docker push <DOCKERHUB_USER>/msg-broker-node-agent:0.1.0
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --tag <DOCKERHUB_USER>/msg-broker-node-agent:0.1.0 \
+  --push \
+  ./node-agent
+
+docker buildx imagetools inspect \
+  <DOCKERHUB_USER>/msg-broker-node-agent:0.1.0
 ```
 
 운영 Bootstrap에는 tag가 아니라 registry가 반환한 `sha256` digest를 전달한다.
+이때 개별 AMD64/ARM64 manifest digest가 아니라 두 플랫폼을 묶은 image index
+digest를 사용해야 한다. containerd가 VM 아키텍처에 맞는 child image를 자동으로
+선택한다.
 `k8s/daemonset.yaml`의 tag는 수동 dry-run 기본값이며 Bootstrap이 적용 전에
 digest로 렌더링한다.
 

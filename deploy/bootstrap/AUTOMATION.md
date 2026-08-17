@@ -1,60 +1,86 @@
-# GCP Bootstrap automation
+# Provider Bootstrap automation
 
-The Broker stores provider-neutral bootstrap jobs, but the first execution
-adapter is GCP. AWS and Azure requests return
-`PROVIDER_BOOTSTRAP_NOT_IMPLEMENTED` until their adapters are added.
+The Broker stores provider-neutral Bootstrap jobs and currently executes them
+through GCP VM Manager or AWS Systems Manager. Azure jobs still return
+`PROVIDER_BOOTSTRAP_NOT_IMPLEMENTED`.
 
-## Flow
+## Common API and safety boundary
 
-1. An administrator creates a job with
-   `POST /v1/admin/resource-targets/{resource_target_id}/bootstrap-jobs`.
-2. The Broker worker adds the unique
-   `msg-broker-bootstrap-job=job-...` label without replacing any existing VM
-   labels.
-3. It creates a zonal OS policy assignment that selects that label and runs a
-   checksum-pinned, action-specific bootstrap runner.
-4. A VM without an Agent certificate obtains a full-format GCP metadata
-   identity JWT. The Broker verifies its audience, project ID, instance ID,
-   and zone before signing the VM-local CSR.
-5. After a compliant report, or after a terminal failure, the worker deletes
-   the OS policy assignment first and then removes only its own label value.
-   A label changed by another actor is never deleted.
+An administrator creates a job with:
 
-The database partial unique index permits only one active job per resource
-target. The API accepts only `INSTALL`, `UPDATE`, `CHECK`, and `REMOVE`; it
-does not accept arbitrary shell commands.
+```http
+POST /v1/admin/resource-targets/{resource_target_id}/bootstrap-jobs
+Authorization: Bearer <ADMIN_JWT>
+Content-Type: application/json
+```
 
-The Broker limits its own active GCP assignments to 10 per project and zone by
-default, leaving headroom below the GCP quota of 20 assignments per project and
-zone. Additional jobs remain `QUEUED`. Configure this with
-`BOOTSTRAP_GCP_MAX_ACTIVE_ASSIGNMENTS_PER_ZONE` (1 through 19). The execution
-timeout starts when a queued job begins applying and defaults to 7200 seconds.
+```json
+{
+  "action": "INSTALL",
+  "bootstrap_version": "0.3.0",
+  "k3s_version": "v1.33.3+k3s1",
+  "agent_image": "repository/agent@sha256:<64-hex-digest>"
+}
+```
 
-## Required deployment settings
+Only `INSTALL`, `UPDATE`, `CHECK`, and `REMOVE` are accepted. There is no
+arbitrary-command API. A database partial unique index permits only one active
+job per resource target. The execution deadline starts when a queued job enters
+`APPLYING` and defaults to 7200 seconds.
 
-- Run the enrollment-enabled compose overlay so `AGENT_ENROLLMENT_CA_DIR` is
-  mounted.
-- Keep `BOOTSTRAP_PUBLIC_BASE_URL` on the public HTTPS Agent hostname.
-- Enable `osconfig.googleapis.com` and full VM Manager functionality in every
-  target project. Target VMs need a running OS Config agent and an attached
-  service account so the metadata identity endpoint is available.
-- By explicit deployment decision, the existing central Broker service account
-  is used for both inventory reads and Bootstrap execution. It needs permission
-  to read and set VM labels, administer OS policy assignments, and read
-  assignment reports. OS policy administration is equivalent to remote code
-  execution on matching VMs, so this accepted single-identity design must be
-  reflected in IAM review and audit monitoring.
-  Prefer a custom Compute role containing `compute.instances.get` and
-  `compute.instances.setLabels`, plus
-  `roles/osconfig.osPolicyAssignmentAdmin` and
-  `roles/osconfig.osPolicyAssignmentReportViewer`.
+Every provider runs the same immutable Bootstrap bundle and job-specific runner.
+Both files are downloaded over HTTPS and checked against SHA-256 values stored
+when the job is created.
 
-The Broker does not enable APIs, change project metadata, or grant IAM roles.
-Those remain explicit project setup operations.
+GCP and AWS jobs accept inventory targets normalized as `AMD64` or `ARM64`.
+Targets with an unknown or unsupported architecture are rejected before any
+provider-side label, policy, or command is created. For `INSTALL` and `UPDATE`,
+`agent_image` must identify the multi-platform OCI image index containing both
+`linux/amd64` and `linux/arm64`, not a platform-specific child manifest.
+
+## GCP flow
+
+1. The worker adds its unique `msg-broker-bootstrap-job=job-...` VM label.
+2. It creates a zonal OS Policy Assignment selected by that label.
+3. The VM obtains a full-format GCP metadata identity JWT. The Broker verifies
+   audience, project, instance ID, and zone before signing the VM-local CSR.
+4. After compliance or terminal failure, the worker deletes the assignment and
+   removes only its own label value.
+
+The Broker defaults to ten active GCP assignments per project and zone, leaving
+headroom below the quota of twenty. Configure the limit with
+`BOOTSTRAP_GCP_MAX_ACTIVE_ASSIGNMENTS_PER_ZONE` from 1 through 19.
+
+Required GCP setup remains OS Config API/agent, VM Manager, and the central
+Broker Service Account permissions documented for the deployment. By explicit
+project decision, the same GCP Service Account is used, even though its inventory
+and Bootstrap permissions should still be separate IAM grants and audited as
+different capabilities.
+
+## AWS flow
+
+1. The worker uses the same Google OIDC -> Hub STS exchange as inventory.
+2. It assumes the account's separate `MsgBrokerBootstrapRole` with the
+   account-specific External ID.
+3. It sends `AWS-RunShellScript` to exactly one EC2 instance and stores the SSM
+   Command ID as `provider_job_id`.
+4. SSM downloads and checksum-verifies the job runner. No one-time secret is in
+   the command.
+5. The VM obtains the EC2 instance identity document and base64 RSA signature
+   from IMDSv2. The Broker verifies AWS's Region public key and matches account,
+   Region, and instance ID before signing the VM-local CSR.
+6. The worker polls `GetCommandInvocation`; the documented eventual-consistency
+   `InvocationDoesNotExist` response remains pending. A deadline cancels the SSM
+   command before marking the job timed out.
+
+The AWS role can send only the AWS-managed `AWS-RunShellScript` document and only
+to instances tagged `msg-broker-bootstrap=enabled`. The EC2 must be an online SSM
+managed node with an instance profile containing
+`AmazonSSMManagedInstanceCore`.
 
 ## Artifact versions
 
-The Docker image builds Bootstrap `0.1.0` by default. Set the Docker build arg
-`BOOTSTRAP_VERSION` to publish another immutable bundle. The UI/API version
-must match an artifact present in `BOOTSTRAP_ARTIFACT_DIR`; otherwise job
-creation fails before any VM label is changed.
+The Docker image builds Bootstrap `0.3.0` by default. Set the Docker build arg
+`BOOTSTRAP_VERSION` to publish another immutable bundle. The UI/API version must
+match an artifact present in `BOOTSTRAP_ARTIFACT_DIR`; otherwise job creation
+fails before any provider-side change.

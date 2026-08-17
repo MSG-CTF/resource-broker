@@ -511,6 +511,26 @@ class ProviderAccountService:
         return role_arn
 
     @staticmethod
+    def aws_external_id(account: ProviderAccountTable) -> str:
+        configured = account.provider_config.get("external_id")
+        if isinstance(configured, str) and configured.strip() == configured:
+            if configured:
+                return configured
+        return f"mbe-{account.account_id}"
+
+    @staticmethod
+    def aws_bootstrap_role_arn(account: ProviderAccountTable) -> str:
+        configured = account.provider_config.get("bootstrap_role_arn")
+        expected_prefix = f"arn:aws:iam::{account.external_account_id}:role/"
+        if isinstance(configured, str) and configured.startswith(expected_prefix):
+            if configured.strip() == configured:
+                return configured
+        return (
+            f"arn:aws:iam::{account.external_account_id}:role/"
+            "MsgBrokerBootstrapRole"
+        )
+
+    @staticmethod
     def _aws_regions(account: ProviderAccountTable) -> tuple[str, ...]:
         raw_regions = account.provider_config.get("regions")
         if not isinstance(raw_regions, list) or not raw_regions:
@@ -642,6 +662,7 @@ class ProviderAccountService:
             credentials = federation.assume_spoke_role(
                 expected_account_id=account.external_account_id,
                 spoke_role_arn=role_arn,
+                external_id=self.aws_external_id(account),
             )
         except AwsAdapterError as error:
             return (

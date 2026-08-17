@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  MSG Broker Google OIDC federation Hub Role for a dedicated AWS tooling
-  member account. Do not deploy this runtime role to the Organizations
-  management account.
+  MSG Broker Google OIDC federation Hub Role. The Hub can assume fixed-name
+  inventory and bootstrap roles in independently owned AWS accounts. Each
+  target role must separately trust this Hub and require its Broker-issued
+  External ID.
 
 Parameters:
   HubRoleName:
@@ -13,9 +14,10 @@ Parameters:
     Type: String
     Default: MsgBrokerInventoryRole
     AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
-  OrganizationId:
+  BootstrapRoleName:
     Type: String
-    AllowedPattern: "^o-[a-z0-9]{10,32}$"
+    Default: MsgBrokerBootstrapRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
   GoogleAudience:
     Type: String
     MinLength: 1
@@ -38,7 +40,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Ref HubRoleName
-      Description: Exchanges the Broker GCP workload identity and assumes inventory Spoke Roles.
+      Description: Exchanges the Broker GCP identity and assumes target-account roles.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -54,17 +56,18 @@ Resources:
                 "accounts.google.com:oaud": !Ref GoogleAudience
                 "accounts.google.com:sub": !Ref GoogleSubject
       Policies:
-        - PolicyName: AssumeInventorySpokeRolesInOrganization
+        - PolicyName: AssumeMsgBrokerTargetAccountRoles
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: AssumeInventorySpokes
+              - Sid: AssumeInventoryRoles
                 Effect: Allow
                 Action: sts:AssumeRole
                 Resource: !Sub "arn:${AWS::Partition}:iam::*:role/${SpokeRoleName}"
-                Condition:
-                  StringEquals:
-                    "aws:ResourceOrgID": !Ref OrganizationId
+              - Sid: AssumeBootstrapRoles
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::*:role/${BootstrapRoleName}"
       Tags:
         - Key: ManagedBy
           Value: MSG-Broker
@@ -73,4 +76,3 @@ Outputs:
   HubRoleArn:
     Description: Set this value as AWS_FEDERATION_HUB_ROLE_ARN on the Broker.
     Value: !GetAtt FederationHubRole.Arn
-

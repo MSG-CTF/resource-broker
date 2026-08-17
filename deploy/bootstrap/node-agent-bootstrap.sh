@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ACTION="${1:-}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,6 +61,9 @@ Required for token enrollment when no usable certificate is already installed:
 GCP automated enrollment instead uses:
   MSG_BROKER_ENROLLMENT_MODE=gcp-identity
   MSG_BROKER_ENROLLMENT_AUDIENCE=<exact Broker audience URL>
+
+AWS automated enrollment instead uses:
+  MSG_BROKER_ENROLLMENT_MODE=aws-instance-identity
 EOF
 }
 
@@ -78,9 +82,13 @@ validate_platform() {
   if [[ "${ID:-}" != "ubuntu" ]]; then
     fail "Only Ubuntu is supported by this Bootstrap version."
   fi
-  if [[ "$(uname -m)" != "x86_64" ]]; then
-    fail "Only Ubuntu AMD64 is supported by this Bootstrap version."
-  fi
+  case "$(uname -m)" in
+    x86_64 | amd64 | aarch64 | arm64)
+      ;;
+    *)
+      fail "Only Ubuntu AMD64 and ARM64 are supported by this Bootstrap version."
+      ;;
+  esac
 }
 
 require_https_url() {
@@ -267,7 +275,8 @@ certificate_is_usable() {
 enroll_certificate() {
   require_https_url "MSG_BROKER_ENROLLMENT_URL" "${ENROLLMENT_URL}"
 
-  local enrollment_token
+  local enrollment_token=""
+  local aws_identity_signature=""
   case "${ENROLLMENT_MODE}" in
     token)
       if [[ -z "${ENROLLMENT_TOKEN_FILE}" \
@@ -295,12 +304,47 @@ enroll_certificate() {
         fail "GCP metadata did not return an instance identity token."
       fi
       ;;
+    aws-instance-identity)
+      local imds_token
+      WORK_DIR="$(mktemp -d)"
+      chmod 0700 "${WORK_DIR}"
+      imds_token="$(curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        --request PUT \
+        --header 'X-aws-ec2-metadata-token-ttl-seconds: 300' \
+        'http://169.254.169.254/latest/api/token')"
+      curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        --header "X-aws-ec2-metadata-token: ${imds_token}" \
+        'http://169.254.169.254/latest/dynamic/instance-identity/document' \
+        --output "${WORK_DIR}/aws-instance-identity-document"
+      aws_identity_signature="$(curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        --header "X-aws-ec2-metadata-token: ${imds_token}" \
+        'http://169.254.169.254/latest/dynamic/instance-identity/signature')"
+      unset imds_token
+      if [[ ! -s "${WORK_DIR}/aws-instance-identity-document" \
+          || -z "${aws_identity_signature}" ]]; then
+        fail "EC2 metadata did not return a signed instance identity document."
+      fi
+      ;;
     *)
-      fail "MSG_BROKER_ENROLLMENT_MODE must be token or gcp-identity."
+      fail "MSG_BROKER_ENROLLMENT_MODE must be token, gcp-identity, or aws-instance-identity."
       ;;
   esac
 
-  WORK_DIR="$(mktemp -d)"
+  if [[ -z "${WORK_DIR}" ]]; then
+    WORK_DIR="$(mktemp -d)"
+  fi
   chmod 0700 "${WORK_DIR}"
   openssl genpkey \
     -algorithm EC \
@@ -313,21 +357,38 @@ enroll_certificate() {
     -subj "/CN=${RESOURCE_TARGET_ID}" \
     -out "${WORK_DIR}/client.csr"
 
-  jq -n \
-    --arg resource_target_id "${RESOURCE_TARGET_ID}" \
-    --rawfile csr "${WORK_DIR}/client.csr" \
-    '{
-      resource_target_id: $resource_target_id,
-      certificate_signing_request_pem: $csr
-    }' > "${WORK_DIR}/request.json"
+  if [[ "${ENROLLMENT_MODE}" == "aws-instance-identity" ]]; then
+    jq -n \
+      --arg resource_target_id "${RESOURCE_TARGET_ID}" \
+      --rawfile csr "${WORK_DIR}/client.csr" \
+      --rawfile aws_document "${WORK_DIR}/aws-instance-identity-document" \
+      --arg aws_signature "${aws_identity_signature}" \
+      '{
+        resource_target_id: $resource_target_id,
+        certificate_signing_request_pem: $csr,
+        aws_instance_identity_document: $aws_document,
+        aws_instance_identity_signature: $aws_signature
+      }' > "${WORK_DIR}/request.json"
+  else
+    jq -n \
+      --arg resource_target_id "${RESOURCE_TARGET_ID}" \
+      --rawfile csr "${WORK_DIR}/client.csr" \
+      '{
+        resource_target_id: $resource_target_id,
+        certificate_signing_request_pem: $csr
+      }' > "${WORK_DIR}/request.json"
+  fi
   cat > "${WORK_DIR}/curl.conf" <<EOF
 request = "POST"
 header = "Accept: application/json"
 header = "Content-Type: application/json"
-header = "Authorization: Bearer ${enrollment_token}"
 EOF
+  if [[ -n "${enrollment_token}" ]]; then
+    printf 'header = "Authorization: Bearer %s"\n' "${enrollment_token}" \
+      >> "${WORK_DIR}/curl.conf"
+  fi
   chmod 0600 "${WORK_DIR}/curl.conf" "${WORK_DIR}/request.json"
-  unset enrollment_token
+  unset enrollment_token aws_identity_signature
 
   local http_status
   http_status="$(curl \
