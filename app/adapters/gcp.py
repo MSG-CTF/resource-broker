@@ -131,6 +131,14 @@ def _architecture(value: object) -> Architecture | None:
     return None
 
 
+def _boot_disk_architecture(instance: object) -> Architecture | None:
+    for disk in getattr(instance, "disks", None) or ():
+        if not getattr(disk, "boot", False):
+            continue
+        return _architecture(getattr(disk, "architecture", None))
+    return None
+
+
 def _attached_storage_mib(instance: object) -> int | None:
     disk_sizes_gib = [
         disk_size_gib
@@ -310,6 +318,8 @@ class GcpAdapter:
                         zone=zone,
                         machine_type=machine_type,
                     )
+                    if architecture is None:
+                        architecture = _boot_disk_architecture(instance)
                     summaries.append(
                         ProviderInstanceSummary(
                             provider_scope_id=self._project_id,

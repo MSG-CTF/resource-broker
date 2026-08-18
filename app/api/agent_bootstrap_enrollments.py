@@ -78,6 +78,7 @@ def enroll_bootstrap_agent(
             aws_instance_identity_signature=(
                 request.aws_instance_identity_signature
             ),
+            azure_attested_document=request.azure_attested_document,
         )
     except InvalidCloudIdentityError:
         return _error(

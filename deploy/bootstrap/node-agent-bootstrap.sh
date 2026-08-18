@@ -12,6 +12,7 @@ AGENT_IMAGE="${MSG_BROKER_AGENT_IMAGE:-}"
 ENROLLMENT_TOKEN_FILE="${MSG_BROKER_ENROLLMENT_TOKEN_FILE:-}"
 ENROLLMENT_MODE="${MSG_BROKER_ENROLLMENT_MODE:-token}"
 ENROLLMENT_AUDIENCE="${MSG_BROKER_ENROLLMENT_AUDIENCE:-}"
+AZURE_ATTESTATION_NONCE="${MSG_BROKER_AZURE_ATTESTATION_NONCE:-}"
 ENROLLMENT_URL="${MSG_BROKER_ENROLLMENT_URL:-https://agents.mjsec.kr/v1/agent/enrollments}"
 OBSERVATIONS_URL="${MSG_BROKER_OBSERVATIONS_URL:-https://agents.mjsec.kr/v1/agent/observations}"
 MANIFEST_DIR="${MSG_BROKER_MANIFEST_DIR:-${PROJECT_ROOT}/node-agent/k8s}"
@@ -64,6 +65,10 @@ GCP automated enrollment instead uses:
 
 AWS automated enrollment instead uses:
   MSG_BROKER_ENROLLMENT_MODE=aws-instance-identity
+
+Azure automated enrollment instead uses:
+  MSG_BROKER_ENROLLMENT_MODE=azure-attested-identity
+  MSG_BROKER_AZURE_ATTESTATION_NONCE=<job-bound-10-digit-nonce>
 EOF
 }
 
@@ -339,8 +344,33 @@ enroll_certificate() {
         fail "EC2 metadata did not return a signed instance identity document."
       fi
       ;;
+    azure-attested-identity)
+      if [[ ! "${AZURE_ATTESTATION_NONCE}" =~ ^[0-9]{10}$ ]]; then
+        fail "A 10-digit MSG_BROKER_AZURE_ATTESTATION_NONCE is required for Azure enrollment."
+      fi
+      WORK_DIR="$(mktemp -d)"
+      chmod 0700 "${WORK_DIR}"
+      curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        --noproxy '*' \
+        --header 'Metadata: true' \
+        --get \
+        --data-urlencode 'api-version=2025-04-07' \
+        --data-urlencode "nonce=${AZURE_ATTESTATION_NONCE}" \
+        'http://169.254.169.254/metadata/attested/document' \
+        --output "${WORK_DIR}/azure-attested-document.json"
+      if [[ "$(jq -r '.encoding // empty' \
+          "${WORK_DIR}/azure-attested-document.json")" != "pkcs7" \
+          || -z "$(jq -r '.signature // empty' \
+          "${WORK_DIR}/azure-attested-document.json")" ]]; then
+        fail "Azure IMDS did not return a signed attested identity document."
+      fi
+      ;;
     *)
-      fail "MSG_BROKER_ENROLLMENT_MODE must be token, gcp-identity, or aws-instance-identity."
+      fail "MSG_BROKER_ENROLLMENT_MODE must be token, gcp-identity, aws-instance-identity, or azure-attested-identity."
       ;;
   esac
 
@@ -370,6 +400,16 @@ enroll_certificate() {
         certificate_signing_request_pem: $csr,
         aws_instance_identity_document: $aws_document,
         aws_instance_identity_signature: $aws_signature
+      }' > "${WORK_DIR}/request.json"
+  elif [[ "${ENROLLMENT_MODE}" == "azure-attested-identity" ]]; then
+    jq -n \
+      --arg resource_target_id "${RESOURCE_TARGET_ID}" \
+      --rawfile csr "${WORK_DIR}/client.csr" \
+      --rawfile azure_document "${WORK_DIR}/azure-attested-document.json" \
+      '{
+        resource_target_id: $resource_target_id,
+        certificate_signing_request_pem: $csr,
+        azure_attested_document: $azure_document
       }' > "${WORK_DIR}/request.json"
   else
     jq -n \

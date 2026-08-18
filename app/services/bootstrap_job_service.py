@@ -10,6 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.adapters.aws import AwsAdapterError
 from app.adapters.aws_bootstrap import AwsBootstrapAdapter, AwsBootstrapTarget
+from app.adapters.azure import AzureAdapterError
+from app.adapters.azure_bootstrap import (
+    AzureBootstrapAdapter,
+    AzureBootstrapCommandStatus,
+    AzureBootstrapTarget,
+)
 from app.adapters.gcp import GcpAdapterError
 from app.adapters.gcp_bootstrap import (
     GcpBootstrapAdapter,
@@ -36,6 +42,8 @@ from app.services.bootstrap_artifacts import (
 _GCP_LABEL_KEY = "msg-broker-bootstrap-job"
 _AWS_OPT_IN_TAG_KEY = "msg-broker-bootstrap"
 _AWS_OPT_IN_TAG_VALUE = "enabled"
+_AZURE_OPT_IN_TAG_KEY = "msg-broker-bootstrap"
+_AZURE_OPT_IN_TAG_VALUE = "enabled"
 _SUPPORTED_BOOTSTRAP_ARCHITECTURES = frozenset(
     {Architecture.AMD64, Architecture.ARM64}
 )
@@ -62,6 +70,9 @@ class BootstrapProviderNotImplementedError(NotImplementedError):
 GcpBootstrapAdapterFactory = Callable[[GcpBootstrapTarget], GcpBootstrapAdapter]
 AwsBootstrapAdapterFactory = Callable[
     [AwsBootstrapTarget, str, str, str], AwsBootstrapAdapter
+]
+AzureBootstrapAdapterFactory = Callable[
+    [AzureBootstrapTarget], AzureBootstrapAdapter
 ]
 AwsSettingProvider = Callable[[], str | None]
 
@@ -156,6 +167,9 @@ class BootstrapJobService:
             _aws_federation_audience_from_environment
         ),
         aws_sts_region_provider: AwsSettingProvider = _aws_sts_region_from_environment,
+        azure_adapter_factory: AzureBootstrapAdapterFactory = (
+            AzureBootstrapAdapter.from_google_oidc
+        ),
     ) -> None:
         self._session = session
         self._jobs = BootstrapJobRepository(session)
@@ -164,6 +178,7 @@ class BootstrapJobService:
         self._aws_hub_role_arn_provider = aws_hub_role_arn_provider
         self._aws_federation_audience_provider = aws_federation_audience_provider
         self._aws_sts_region_provider = aws_sts_region_provider
+        self._azure_adapter_factory = azure_adapter_factory
 
     def create(
         self,
@@ -183,7 +198,7 @@ class BootstrapJobService:
         if target is None:
             raise BootstrapResourceTargetNotFoundError
         provider = target.account.provider
-        if provider not in {Provider.GCP, Provider.AWS}:
+        if provider not in {Provider.GCP, Provider.AWS, Provider.AZURE}:
             raise BootstrapProviderNotImplementedError(provider)
         self._validate_target_for_create(target, provider)
         if self._jobs.active_for_resource(resource_target_id) is not None:
@@ -193,6 +208,7 @@ class BootstrapJobService:
         now = datetime.now(UTC)
         job_id = uuid4()
         is_gcp = provider is Provider.GCP
+        is_azure = provider is Provider.AZURE
         job = BootstrapJobTable(
             job_id=job_id,
             resource_target_id=resource_target_id,
@@ -205,10 +221,26 @@ class BootstrapJobService:
             artifact_sha256=artifact.sha256,
             runner_sha256="0" * 64,
             enrollment_audience=enrollment_audience(job_id),
-            provider_job_id=_assignment_id(job_id) if is_gcp else None,
-            temporary_label_key=_GCP_LABEL_KEY if is_gcp else _AWS_OPT_IN_TAG_KEY,
+            provider_job_id=(
+                _assignment_id(job_id) if is_gcp or is_azure else None
+            ),
+            temporary_label_key=(
+                _GCP_LABEL_KEY
+                if is_gcp
+                else (
+                    _AZURE_OPT_IN_TAG_KEY
+                    if is_azure
+                    else _AWS_OPT_IN_TAG_KEY
+                )
+            ),
             temporary_label_value=(
-                _label_value(job_id) if is_gcp else _AWS_OPT_IN_TAG_VALUE
+                _label_value(job_id)
+                if is_gcp
+                else (
+                    _AZURE_OPT_IN_TAG_VALUE
+                    if is_azure
+                    else _AWS_OPT_IN_TAG_VALUE
+                )
             ),
             deadline_at=now + timedelta(seconds=_timeout_seconds()),
             created_at=now,
@@ -286,6 +318,9 @@ class BootstrapJobService:
         elif provider is Provider.AWS:
             if resource.provider_scope_id is None:
                 raise BootstrapResourceTargetInvalidError
+        elif provider is Provider.AZURE:
+            if resource.provider_scope_id is None or resource.region is None:
+                raise BootstrapResourceTargetInvalidError
 
     @staticmethod
     def _gcp_target(resource: ResourceTargetTable) -> GcpBootstrapTarget:
@@ -323,6 +358,32 @@ class BootstrapJobService:
         )
 
     @staticmethod
+    def _azure_target(resource: ResourceTargetTable) -> AzureBootstrapTarget:
+        if (
+            resource.provider_scope_id is None
+            or resource.instance_name is None
+            or resource.region is None
+        ):
+            raise BootstrapResourceTargetInvalidError
+        client_id = resource.account.provider_config.get("client_id")
+        if (
+            not isinstance(client_id, str)
+            or not client_id
+            or client_id.strip() != client_id
+        ):
+            raise BootstrapResourceTargetInvalidError
+        return AzureBootstrapTarget(
+            tenant_id=resource.account.external_account_id,
+            client_id=client_id,
+            subscription_id=resource.provider_scope_id,
+            instance_id=resource.provider_instance_id,
+            instance_name=resource.instance_name,
+            location=resource.region,
+            opt_in_tag_key=_AZURE_OPT_IN_TAG_KEY,
+            opt_in_tag_value=_AZURE_OPT_IN_TAG_VALUE,
+        )
+
+    @staticmethod
     def _required_aws_setting(provider: AwsSettingProvider, message: str) -> str:
         value = provider()
         if not isinstance(value, str) or not value or value.strip() != value:
@@ -357,6 +418,8 @@ class BootstrapJobService:
             self._process_gcp(job, resource)
         elif job.provider is Provider.AWS:
             self._process_aws(job, resource)
+        elif job.provider is Provider.AZURE:
+            self._process_azure(job, resource)
         else:
             self._complete(
                 job,
@@ -542,6 +605,114 @@ class BootstrapJobService:
                 "BOOTSTRAP_INTERNAL_ERROR",
                 "The bootstrap job failed before completion.",
             )
+
+    def _process_azure(
+        self,
+        job: BootstrapJobTable,
+        resource: ResourceTargetTable,
+    ) -> None:
+        try:
+            adapter = self._azure_adapter_factory(self._azure_target(resource))
+        except BootstrapResourceTargetInvalidError:
+            self._invalid_target(job)
+            return
+        except AzureAdapterError as error:
+            self._complete(
+                job,
+                BootstrapJobStatus.FAILED,
+                error.error_code,
+                error.public_message,
+            )
+            return
+        try:
+            if job.status is BootstrapJobStatus.APPLYING:
+                run_command_name = job.provider_job_id or _assignment_id(job.job_id)
+                job.provider_job_id = adapter.send_runner(
+                    run_command_name=run_command_name,
+                    runner_url=runner_public_url(job.job_id),
+                    runner_sha256=job.runner_sha256,
+                    timeout_seconds=_timeout_seconds(),
+                )
+                job.status = BootstrapJobStatus.RUNNING
+                job.error_code = None
+                job.error_message = None
+                self._session.commit()
+                return
+
+            now = datetime.now(UTC)
+            if now >= job.deadline_at:
+                self._cleanup_azure(adapter, job)
+                self._complete(
+                    job,
+                    BootstrapJobStatus.FAILED,
+                    "BOOTSTRAP_JOB_TIMEOUT",
+                    "The bootstrap job did not finish before its deadline.",
+                )
+                return
+            if job.provider_job_id is None:
+                self._complete(
+                    job,
+                    BootstrapJobStatus.FAILED,
+                    "AZURE_RUN_COMMAND_ID_MISSING",
+                    "The Azure Run Command name is missing.",
+                )
+                return
+            outcome = adapter.command_status(job.provider_job_id)
+            if not outcome.complete:
+                job.updated_at = now
+                self._session.commit()
+                return
+            self._finish_azure_command(adapter, job, outcome)
+        except AzureAdapterError as error:
+            if job.status is BootstrapJobStatus.APPLYING:
+                self._complete(
+                    job,
+                    BootstrapJobStatus.FAILED,
+                    error.error_code,
+                    error.public_message,
+                )
+                return
+            job.error_code = error.error_code
+            job.error_message = error.public_message
+            self._session.commit()
+        except Exception:
+            self._complete(
+                job,
+                BootstrapJobStatus.FAILED,
+                "BOOTSTRAP_INTERNAL_ERROR",
+                "The bootstrap job failed before completion.",
+            )
+
+    def _finish_azure_command(
+        self,
+        adapter: AzureBootstrapAdapter,
+        job: BootstrapJobTable,
+        outcome: AzureBootstrapCommandStatus,
+    ) -> None:
+        try:
+            self._cleanup_azure(adapter, job)
+        except AzureAdapterError as error:
+            job.error_code = error.error_code
+            job.error_message = error.public_message
+            self._session.commit()
+            return
+        if outcome.succeeded:
+            self._complete(job, BootstrapJobStatus.SUCCEEDED, None, None)
+        else:
+            self._complete(
+                job,
+                BootstrapJobStatus.FAILED,
+                outcome.error_code or "AZURE_RUN_COMMAND_FAILED",
+                outcome.error_message or "Azure Run Command failed.",
+            )
+
+    @staticmethod
+    def _cleanup_azure(
+        adapter: AzureBootstrapAdapter,
+        job: BootstrapJobTable,
+    ) -> None:
+        if job.provider_job_id is not None:
+            adapter.delete_command(job.provider_job_id)
 
     @staticmethod
     def _cleanup_gcp(adapter: GcpBootstrapAdapter, job: BootstrapJobTable) -> None:

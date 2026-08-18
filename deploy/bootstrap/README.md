@@ -45,9 +45,9 @@ Bootstrap `remove`는 Runtime이 사용할 수 있는 k3s를 제거하지 않는
 - 중앙 Broker 최초 observation 전달
 - 최종 `BOOTSTRAP_STATUS=ready`
 
-이 검증은 공통 VM-local package의 수동 Canary다. 현재 GCP OS Policy와 AWS SSM
-Run Command 무SSH 실행 adapter가 같은 package를 사용한다. Azure VM Run Command는
-아직 구현되지 않았다.
+이 검증은 공통 VM-local package의 수동 Canary다. 현재 GCP OS Policy, AWS SSM,
+Azure Managed Run Command 무SSH 실행 adapter가 같은 package를 사용한다. Azure
+경로는 구현됐지만 실제 Azure VM Canary는 아직 수행하지 않았다.
 
 ## Enrollment API
 
@@ -162,11 +162,14 @@ Provider Bootstrap job은 별도 공개 경로를 사용한다.
 - GCP: 정확한 audience로 발급된 VM identity JWT를 Bearer header로 제출
 - AWS: IMDSv2의 instance identity document와 base64 RSA signature를 request
   body에 제출하며 Bearer token은 사용하지 않음
+- Azure: job 전용 10자리 nonce로 요청한 IMDS PKCS#7 attested document를 request
+  body에 제출하며 Bearer token은 사용하지 않음
 
-두 방식 모두 job이 `APPLYING` 또는 `RUNNING`이고 deadline 전이며 아직 한 번도
+세 방식 모두 job이 `APPLYING` 또는 `RUNNING`이고 deadline 전이며 아직 한 번도
 소비되지 않았을 때만 인증서를 발급한다. GCP는 project/instance/zone을, AWS는
-AWS 공개키 서명과 account/Region/instance ID를 DB resource target과 비교한다.
-private key는 VM에서 생성되고 밖으로 나오지 않는다.
+AWS 공개키 서명과 account/Region/instance ID를 비교한다. Azure는 공개 인증서
+체인, 서명, nonce, 유효시간을 검증하고 Subscription ID와 `vmId`를 DB resource
+target과 비교한다. private key는 VM에서 생성되고 밖으로 나오지 않는다.
 
 ## 중앙 Broker 준비
 
@@ -251,9 +254,9 @@ sudo bash deploy/bootstrap/node-agent-bootstrap.sh remove
 Provider 관리면에 전달할 버전 고정 bundle과 checksum을 만든다.
 
 ```bash
-bash deploy/bootstrap/build-bundle.sh 0.3.1
+bash deploy/bootstrap/build-bundle.sh 0.4.0
 ```
 
-생성되는 `dist/*.tar.gz`와 `.sha256`은 artifact 저장소에 올린다. 현재 AWS SSM과
-GCP OS Policy가 checksum 검증 후 같은 bundle을 실행한다. Azure Managed Run
-Command도 같은 계약으로 추가해야 한다. 개인 SSH/SCP는 운영 배포 경로가 아니다.
+생성되는 `dist/*.tar.gz`와 `.sha256`은 artifact 저장소에 올린다. AWS SSM, GCP
+OS Policy, Azure Managed Run Command가 checksum 검증 후 같은 bundle을 실행한다.
+개인 SSH/SCP는 운영 배포 경로가 아니다.

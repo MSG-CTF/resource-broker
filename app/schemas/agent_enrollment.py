@@ -59,6 +59,11 @@ class AgentEnrollmentRequest(ApiSchema):
         max_length=4096,
         pattern=r"^[A-Za-z0-9+/=]+$",
     )
+    azure_attested_document: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=65536,
+    )
 
 
 class AgentEnrollmentResponse(ApiSchema):

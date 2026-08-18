@@ -1,8 +1,7 @@
 # Provider Bootstrap automation
 
-The Broker stores provider-neutral Bootstrap jobs and currently executes them
-through GCP VM Manager or AWS Systems Manager. Azure jobs still return
-`PROVIDER_BOOTSTRAP_NOT_IMPLEMENTED`.
+The Broker stores provider-neutral Bootstrap jobs and executes them through GCP
+VM Manager, AWS Systems Manager, or Azure Managed Run Command.
 
 ## Common API and safety boundary
 
@@ -17,7 +16,7 @@ Content-Type: application/json
 ```json
 {
   "action": "INSTALL",
-  "bootstrap_version": "0.3.1",
+  "bootstrap_version": "0.4.0",
   "k3s_version": "v1.33.3+k3s1",
   "agent_image": "repository/agent@sha256:<64-hex-digest>"
 }
@@ -32,7 +31,8 @@ Every provider runs the same immutable Bootstrap bundle and job-specific runner.
 Both files are downloaded over HTTPS and checked against SHA-256 values stored
 when the job is created.
 
-GCP and AWS jobs accept inventory targets normalized as `AMD64` or `ARM64`.
+GCP, AWS, and Azure jobs accept inventory targets normalized as `AMD64` or
+`ARM64`.
 Targets with an unknown or unsupported architecture are rejected before any
 provider-side label, policy, or command is created. For `INSTALL` and `UPDATE`,
 `agent_image` must identify the multi-platform OCI image index containing both
@@ -78,9 +78,30 @@ to instances tagged `msg-broker-bootstrap=enabled`. The EC2 must be an online SS
 managed node with an instance profile containing
 `AmazonSSMManagedInstanceCore`.
 
+## Azure flow
+
+1. The worker exchanges a Google metadata ID token with Microsoft Entra by
+   using the target tenant's Federated Credential and App Registration.
+2. It resolves the inventory `vmId` to one exact Resource Group and VM, then
+   requires `msg-broker-bootstrap=enabled` and a ready Azure Linux Agent.
+3. It creates a job-named Managed Run Command and stores that resource name as
+   `provider_job_id`. The command downloads and checksum-verifies the common
+   runner; no enrollment secret is included.
+4. The VM requests an Azure IMDS PKCS#7 attested document with a job-bound
+   10-digit nonce. The Broker validates the public certificate chain, signed
+   lifetime and nonce, then matches Subscription ID and `vmId` before signing
+   the VM-local CSR.
+5. The worker polls the Run Command instance view and deletes the command
+   resource after success, failure, or timeout.
+
+The Entra application needs Reader access for inventory and a minimal custom
+role at each approved Resource Group containing the Managed Run Command
+read/write/delete operations. The VM must be an Ubuntu AMD64 or ARM64 VM with a
+ready Azure Linux Agent and outbound HTTPS connectivity.
+
 ## Artifact versions
 
-The Docker image builds Bootstrap `0.3.1` by default. Set the Docker build arg
+The Docker image builds Bootstrap `0.4.0` by default. Set the Docker build arg
 `BOOTSTRAP_VERSION` to publish another immutable bundle. The UI/API version must
 match an artifact present in `BOOTSTRAP_ARTIFACT_DIR`; otherwise job creation
 fails before any provider-side change.

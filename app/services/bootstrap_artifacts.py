@@ -6,6 +6,7 @@ import shlex
 from uuid import UUID
 
 from app.domain.enums import BootstrapAction, Provider
+from app.services.azure_instance_identity import azure_attestation_nonce
 
 
 class BootstrapArtifactNotFoundError(LookupError):
@@ -90,6 +91,7 @@ def render_runner_script(
     enrollment_mode = {
         Provider.GCP: "gcp-identity",
         Provider.AWS: "aws-instance-identity",
+        Provider.AZURE: "azure-attested-identity",
     }.get(provider)
     if enrollment_mode is None:
         raise BootstrapConfigurationError(
@@ -105,6 +107,11 @@ def render_runner_script(
         "ARTIFACT_SHA256": artifact_sha256,
         "ENROLLMENT_URL": enrollment_url,
         "ENROLLMENT_AUDIENCE": enrollment_audience_value,
+        "AZURE_ATTESTATION_NONCE": (
+            azure_attestation_nonce(job_id)
+            if provider is Provider.AZURE
+            else ""
+        ),
         "K3S_VERSION": k3s_version or "",
         "AGENT_IMAGE": agent_image or "",
     }
@@ -137,6 +144,7 @@ MSG_BROKER_AGENT_IMAGE="${{AGENT_IMAGE}}" \
 MSG_BROKER_ENROLLMENT_MODE={enrollment_mode} \
 MSG_BROKER_ENROLLMENT_URL="${{ENROLLMENT_URL}}" \
 MSG_BROKER_ENROLLMENT_AUDIENCE="${{ENROLLMENT_AUDIENCE}}" \
+MSG_BROKER_AZURE_ATTESTATION_NONCE="${{AZURE_ATTESTATION_NONCE}}" \
   bash "${{SCRIPT}}" "${{ACTION}}"
 install -d -o root -g root -m 0700 "${{MARKER_DIR}}"
 printf '%s\n' "${{ACTION}}" > "${{MARKER_DIR}}/${{JOB_ID}}.done"

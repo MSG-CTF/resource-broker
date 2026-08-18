@@ -25,6 +25,12 @@ from app.services.aws_instance_identity import (
     InvalidAwsInstanceIdentityError,
     verify_aws_instance_identity,
 )
+from app.services.azure_instance_identity import (
+    AzureInstanceIdentity,
+    InvalidAzureInstanceIdentityError,
+    azure_attestation_nonce,
+    verify_azure_instance_identity,
+)
 
 
 class InvalidCloudIdentityError(ValueError):
@@ -41,6 +47,7 @@ class BootstrapEnrollmentUnavailableError(ValueError):
 
 CloudTokenVerifier = Callable[[str, str], Mapping[str, Any]]
 AwsIdentityVerifier = Callable[[str, str], AwsInstanceIdentity]
+AzureIdentityVerifier = Callable[[str, str], AzureInstanceIdentity]
 
 
 def verify_gcp_identity_token(token: str, audience: str) -> Mapping[str, Any]:
@@ -78,12 +85,16 @@ class CloudBootstrapEnrollmentService:
         session: Session,
         token_verifier: CloudTokenVerifier = verify_gcp_identity_token,
         aws_identity_verifier: AwsIdentityVerifier = verify_aws_instance_identity,
+        azure_identity_verifier: AzureIdentityVerifier = (
+            verify_azure_instance_identity
+        ),
     ) -> None:
         self._session = session
         self._jobs = BootstrapJobRepository(session)
         self._enrollments = AgentEnrollmentRepository(session)
         self._token_verifier = token_verifier
         self._aws_identity_verifier = aws_identity_verifier
+        self._azure_identity_verifier = azure_identity_verifier
 
     def enroll(
         self,
@@ -94,6 +105,7 @@ class CloudBootstrapEnrollmentService:
         csr_pem: str,
         aws_instance_identity_document: str | None = None,
         aws_instance_identity_signature: str | None = None,
+        azure_attested_document: str | None = None,
         certificate_authority: AgentCertificateAuthority | None = None,
     ) -> AgentEnrollmentOutcome:
         job = self._jobs.get(job_id, for_update=True)
@@ -157,6 +169,25 @@ class CloudBootstrapEnrollmentService:
                 identity.account_id != resource.account.external_account_id
                 or identity.region != resource.provider_scope_id
                 or identity.instance_id != resource.provider_instance_id
+            ):
+                raise CloudIdentityTargetMismatchError
+        elif job.provider is Provider.AZURE:
+            if azure_attested_document is None:
+                raise InvalidCloudIdentityError
+            try:
+                identity = self._azure_identity_verifier(
+                    azure_attested_document,
+                    azure_attestation_nonce(job.job_id),
+                )
+            except InvalidAzureInstanceIdentityError as error:
+                raise InvalidCloudIdentityError from error
+            except Exception as error:
+                raise InvalidCloudIdentityError from error
+            if (
+                identity.subscription_id.lower()
+                != (resource.provider_scope_id or "").lower()
+                or identity.instance_id.lower()
+                != resource.provider_instance_id.lower()
             ):
                 raise CloudIdentityTargetMismatchError
         else:
