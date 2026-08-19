@@ -1,19 +1,14 @@
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 from enum import Enum
 
 from app.domain.enums import (
     Architecture,
-    CostStatus,
     CredentialStatus,
-    Currency,
     PermissionStatus,
     Provider,
     ProviderApiStatus,
     QuotaStatus,
-    ReasonCode,
-    RiskLevel,
     RuntimeType,
 )
 
@@ -54,15 +49,6 @@ def _require_aware_datetime(name: str, value: object) -> None:
         raise TypeError(f"{name} must be a datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{name} must include timezone information")
-
-
-def _require_non_negative_decimal(name: str, value: object) -> None:
-    if not isinstance(value, Decimal):
-        raise TypeError(f"{name} must be a Decimal")
-    if not value.is_finite():
-        raise ValueError(f"{name} must be finite")
-    if value < 0:
-        raise ValueError(f"{name} must be greater than or equal to 0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,74 +160,3 @@ class ActiveResourceUsage:
             "ephemeral_storage_mib",
             self.ephemeral_storage_mib,
         )
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateCapacity:
-    available_cpu_millicores: int
-    available_memory_mib: int
-    available_ephemeral_storage_mib: int
-    fit_count: int
-
-    def __post_init__(self) -> None:
-        _require_non_negative_int(
-            "available_cpu_millicores",
-            self.available_cpu_millicores,
-        )
-        _require_non_negative_int(
-            "available_memory_mib",
-            self.available_memory_mib,
-        )
-        _require_non_negative_int(
-            "available_ephemeral_storage_mib",
-            self.available_ephemeral_storage_mib,
-        )
-        _require_non_negative_int("fit_count", self.fit_count)
-
-
-#이놈 비용 계산 어떻게 할지 정해야 하는데.. 개인적으로 추가비용이 어떤 상황에서 생길지 잘 모르겠네
-@dataclass(frozen=True, slots=True)
-class CandidateCostEstimate:
-    status: CostStatus
-    estimated_request_cost: Decimal
-    currency: Currency
-    observed_at: datetime
-
-    def __post_init__(self) -> None:
-        _require_enum("status", self.status, CostStatus)
-        _require_non_negative_decimal(
-            "estimated_request_cost",
-            self.estimated_request_cost,
-        )
-        _require_enum("currency", self.currency, Currency)
-        _require_aware_datetime("observed_at", self.observed_at)
-
-
-@dataclass(frozen=True, slots=True)
-class ResourceCandidate:
-    candidate_id: str
-    target: ResourceTarget
-    capacity: CandidateCapacity
-    cost_estimate: CandidateCostEstimate
-    risk: RiskLevel
-    reason_codes: tuple[ReasonCode, ...]
-    observed_at: datetime
-    valid_until: datetime
-
-    def __post_init__(self) -> None:
-        _require_non_empty_string("candidate_id", self.candidate_id)
-        if not isinstance(self.target, ResourceTarget):
-            raise TypeError("target must be a ResourceTarget")
-        if not isinstance(self.capacity, CandidateCapacity):
-            raise TypeError("capacity must be a CandidateCapacity")
-        if not isinstance(self.cost_estimate, CandidateCostEstimate):
-            raise TypeError("cost_estimate must be a CandidateCostEstimate")
-        _require_enum("risk", self.risk, RiskLevel)
-        if not isinstance(self.reason_codes, tuple):
-            raise TypeError("reason_codes must be a tuple")
-        for reason_code in self.reason_codes:
-            _require_enum("reason_codes item", reason_code, ReasonCode)
-        _require_aware_datetime("observed_at", self.observed_at)
-        _require_aware_datetime("valid_until", self.valid_until)
-        if self.valid_until <= self.observed_at:
-            raise ValueError("valid_until must be later than observed_at")

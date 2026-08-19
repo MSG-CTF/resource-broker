@@ -29,6 +29,7 @@ from app.domain.enums import (
     PermissionStatus,
     Provider,
     ProviderApiStatus,
+    ReservationStatus,
     RuntimeType,
 )
 
@@ -349,6 +350,123 @@ class ResourceTargetTable(Base):
         back_populates="resource_target",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+
+    reservations: Mapped[list[ReservationTable]] = relationship(
+        back_populates="resource_target",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class ReservationTable(Base):
+    __tablename__ = "reservations"
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_reservations_idempotency_key",
+        ),
+        CheckConstraint(
+            "cpu_millicores > 0",
+            name="cpu_positive",
+        ),
+        CheckConstraint(
+            "memory_mib > 0",
+            name="memory_positive",
+        ),
+        CheckConstraint(
+            "ephemeral_storage_mib > 0",
+            name="ephemeral_storage_positive",
+        ),
+        CheckConstraint(
+            "team_id > 0",
+            name="team_id_positive",
+        ),
+        CheckConstraint(
+            "challenge_id > 0",
+            name="challenge_id_positive",
+        ),
+        Index(
+            "ix_reservations_target_status",
+            "resource_target_id",
+            "status",
+        ),
+        Index(
+            "ix_reservations_expires_at",
+            "expires_at",
+        ),
+        Index(
+            "uq_reservations_active_instance",
+            "team_id",
+            "instance_id",
+            unique=True,
+            postgresql_where=text("status IN ('HELD', 'COMMITTED')"),
+        ),
+    )
+
+    reservation_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+    )
+    request_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    resource_target_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey(
+            "resource_targets.resource_target_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    team_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    challenge_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    instance_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    cpu_millicores: Mapped[int] = mapped_column(Integer, nullable=False)
+    memory_mib: Mapped[int] = mapped_column(Integer, nullable=False)
+    ephemeral_storage_mib: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    architecture: Mapped[Architecture] = mapped_column(
+        _enum_type(Architecture, "reservation_architecture"),
+        nullable=False,
+    )
+    status: Mapped[ReservationStatus] = mapped_column(
+        _enum_type(ReservationStatus, "reservation_status"),
+        nullable=False,
+        default=ReservationStatus.HELD,
+        server_default=ReservationStatus.HELD.value,
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    committed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    resource_target: Mapped[ResourceTargetTable] = relationship(
+        back_populates="reservations",
     )
 
 

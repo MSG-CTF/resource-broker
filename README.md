@@ -13,13 +13,14 @@ AWS, GCP, Azure VM inventory를 공통 snapshot으로 관리하는 Resource Brok
 - GCE에서는 별도 JSON key 없이 attached Service Account의 metadata ADC를 쓴다.
 - AWS inventory와 Bootstrap은 같은 GCP Service Account의 Google OIDC ID Token을
   AWS STS Hub/target-account Role로 교환하며 AWS Access Key를 저장하지 않는다.
+- Azure inventory와 Bootstrap은 같은 Google OIDC ID Token을 Entra Federated
+  Credential로 교환하며 Azure Client Secret을 저장하지 않는다.
 
 `compose.dev.yaml`은 로컬 개발 편의만 추가한다.
 
 - PostgreSQL: `127.0.0.1:5432`
 - FastAPI: `127.0.0.1:8000`
 - Vite: `127.0.0.1:5173`
-- Azure Client Secret 전환 경로
 
 ## 최초 환경 설정
 
@@ -100,6 +101,22 @@ AWS는 계정 하나당 Provider Account 하나를 등록하고, 명시한 Regio
 CloudFormation 템플릿과 AWS Console 적용 순서는
 `deploy/aws/README.md`를 참고한다. 고객 계정을 Organizations에 초대하거나
 AWS Access Key를 전달받지 않는다.
+
+## Azure Provider
+
+Azure는 Tenant 하나당 Entra App Registration 하나를 등록하고, 여러
+Subscription ID를 조회 범위로 사용할 수 있다.
+
+- 인증: GCP metadata Google OIDC → Entra Federated Credential → Azure 임시 토큰
+- audience: `api://AzureADTokenExchange`
+- 조회 권한: 각 Subscription의 `Reader`
+- 저장 설정: Tenant ID, Application Client ID, Subscription ID만 저장
+- 금지: Azure Client Secret을 `.env`, DB, 이미지에 저장하지 않음
+- Bootstrap: 대상 Resource Group의 제한된 Managed Run Command 권한과
+  `msg-broker-bootstrap=enabled` tag 사용
+
+Azure 계정 등록 후 Verify/Sync를 실행하면 기존 계정의 인증 메타데이터도
+Google OIDC 방식으로 갱신된다.
 
 ## 로컬 개발 실행
 

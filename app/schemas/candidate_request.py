@@ -13,7 +13,12 @@ from app.domain.enums import Architecture
 
 NonEmptyString = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, min_length=1, strict=True),
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=255,
+        strict=True,
+    ),
 ]
 
 
@@ -35,3 +40,4 @@ class CandidateQueryRequest(RequestSchema):
     challenge_id: int = Field(gt=0, strict=True)
     instance_id: NonEmptyString
     resource_profile: ResourceProfile
+    max_candidates: int = Field(default=50, ge=1, le=200, strict=True)

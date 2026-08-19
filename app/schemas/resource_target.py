@@ -16,6 +16,10 @@ class ResourceCapacityResponse(ApiSchema):
     storage_mib: int | None = Field(default=None, ge=0)
 
 
+class AdminResourceTargetUpdateRequest(ApiSchema):
+    enabled: bool = Field(strict=True)
+
+
 class ResourceRuntimeResponse(ApiSchema):
     type: RuntimeType | None
     target_id: str | None

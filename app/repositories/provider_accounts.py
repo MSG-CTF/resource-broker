@@ -77,6 +77,20 @@ class ResourceTargetRepository:
     def get(self, resource_target_id: UUID) -> ResourceTargetTable | None:
         return self._session.get(ResourceTargetTable, resource_target_id)
 
+    def get_for_update(
+        self,
+        resource_target_id: UUID,
+    ) -> ResourceTargetTable | None:
+        statement = (
+            select(ResourceTargetTable)
+            .where(
+                ResourceTargetTable.resource_target_id
+                == resource_target_id
+            )
+            .with_for_update()
+        )
+        return self._session.scalar(statement)
+
     def list_runtime_containers(
         self,
         resource_target_id: UUID,

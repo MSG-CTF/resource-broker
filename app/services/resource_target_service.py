@@ -66,3 +66,17 @@ class ResourceTargetService:
                 resource_target_id
             ),
         )
+
+    def set_enabled(
+        self,
+        resource_target_id: UUID,
+        *,
+        enabled: bool,
+    ) -> ResourceTargetTable:
+        resource = self._resources.get_for_update(resource_target_id)
+        if resource is None:
+            raise ResourceTargetNotFoundError
+        resource.enabled = enabled
+        self._session.commit()
+        self._session.refresh(resource)
+        return resource

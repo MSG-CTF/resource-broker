@@ -14,6 +14,7 @@ from app.schemas.provider_account import ErrorResponse
 from app.schemas.resource_target import (
     AdminResourceTargetListResponse,
     AdminResourceTargetResponse,
+    AdminResourceTargetUpdateRequest,
     AdminRuntimeContainerListResponse,
     AdminRuntimeContainerResponse,
     ResourceCapacityResponse,
@@ -158,6 +159,44 @@ def list_resource_targets(
         offset=offset,
         items=[_resource_response(item) for item in outcome.resources],
     )
+
+
+@router.patch(
+    "/{resource_target_id}",
+    response_model=AdminResourceTargetResponse,
+    summary="Enable or disable a VM for Scheduler candidates",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+    },
+)
+def update_resource_target(
+    resource_target_id: UUID,
+    request: AdminResourceTargetUpdateRequest,
+    session: Session = Depends(get_db_session),
+) -> AdminResourceTargetResponse | Response:
+    try:
+        resource = ResourceTargetService(session).set_enabled(
+            resource_target_id,
+            enabled=request.enabled,
+        )
+    except ResourceTargetNotFoundError:
+        return _error_response(
+            status.HTTP_404_NOT_FOUND,
+            "RESOURCE_TARGET_NOT_FOUND",
+            "The resource target was not found.",
+        )
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            "The resource target could not be updated.",
+        )
+    return _resource_response(resource)
 
 
 @router.get(

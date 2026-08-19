@@ -20,6 +20,11 @@ from app.api.agent_bootstrap_enrollments import router as agent_bootstrap_enroll
 from app.api.agent_observations import router as agent_observations_router
 from app.api.candidates import router as candidates_router
 from app.api.health import router as health_router
+from app.api.reservations import router as reservations_router
+from app.api.scheduler_auth import (
+    SchedulerAuthHttpError,
+    scheduler_auth_http_error_handler,
+)
 from app.services.bootstrap_worker import run_bootstrap_worker
 
 
@@ -48,6 +53,10 @@ def create_app() -> FastAPI:
         AdminAuthHttpError,
         admin_auth_http_error_handler,
     )
+    app.add_exception_handler(
+        SchedulerAuthHttpError,
+        scheduler_auth_http_error_handler,
+    )
     app.include_router(admin_auth_router)
     app.include_router(admin_agent_enrollments_router)
     app.include_router(admin_bootstrap_jobs_router)
@@ -58,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_bootstrap_enrollments_router)
     app.include_router(agent_observations_router)
     app.include_router(candidates_router)
+    app.include_router(reservations_router)
     app.include_router(health_router)
 
     @app.get(

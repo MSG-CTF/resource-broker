@@ -30,6 +30,7 @@ from app.services.provider_account_service import (
     InvalidProviderAccountConfigError,
     ProviderAccountNotFoundError,
     ProviderAccountHasActiveBootstrapJobsError,
+    ProviderAccountHasActiveReservationsError,
     ProviderAccountService,
     ProviderNotImplementedError,
     ProviderScopeInspection,
@@ -353,6 +354,12 @@ def delete_provider_account(
             status.HTTP_409_CONFLICT,
             "PROVIDER_ACCOUNT_HAS_ACTIVE_BOOTSTRAP_JOBS",
             "The provider account has active bootstrap jobs.",
+        )
+    except ProviderAccountHasActiveReservationsError:
+        return _error_response(
+            status.HTTP_409_CONFLICT,
+            "PROVIDER_ACCOUNT_HAS_ACTIVE_RESERVATIONS",
+            "The provider account has active Scheduler reservations.",
         )
     except SQLAlchemyError:
         session.rollback()
