@@ -28,6 +28,7 @@ class ResourceTargetNotFoundError(LookupError):
 
 class ResourceTargetService:
     def __init__(self, session: Session) -> None:
+        self._session = session
         self._resources = ResourceTargetRepository(session)
 
     def list_resources(
