@@ -45,6 +45,12 @@ class CandidateRepository:
                 ResourceTargetTable.runtime_last_seen_at.is_not(None),
                 ResourceTargetTable.runtime_last_seen_at > observed_after,
                 ResourceTargetTable.runtime_observed_at.is_not(None),
+                ResourceTargetTable.provider_capacity_cpu_millicores.is_not(
+                    None
+                ),
+                ResourceTargetTable.provider_capacity_memory_mib.is_not(None),
+                ResourceTargetTable.runtime_cpu_usage_millicores.is_not(None),
+                ResourceTargetTable.runtime_memory_usage_mib.is_not(None),
                 ResourceTargetTable.allocatable_cpu_millicores.is_not(None),
                 ResourceTargetTable.allocatable_memory_mib.is_not(None),
                 ResourceTargetTable.allocatable_ephemeral_storage_mib.is_not(

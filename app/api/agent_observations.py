@@ -10,6 +10,7 @@ from app.db.session import get_db_session
 from app.repositories.runtime_observations import RuntimeContainerSnapshot
 from app.schemas.agent_observation import (
     AgentCapacity,
+    AgentNodeUsage,
     AgentObservationRequest,
     AgentObservationResponse,
 )
@@ -17,6 +18,7 @@ from app.schemas.provider_account import ErrorResponse
 from app.services.agent_observation_service import (
     AgentObservationService,
     ObservationCapacity,
+    ObservationUsage,
     ResourceTargetNotFoundError,
     RetiredResourceTargetError,
     StaleAgentObservationError,
@@ -42,13 +44,23 @@ def _capacity(capacity: AgentCapacity) -> ObservationCapacity:
     )
 
 
+def _usage(usage: AgentNodeUsage | None) -> ObservationUsage | None:
+    if usage is None:
+        return None
+    return ObservationUsage(
+        cpu_millicores=usage.cpu_millicores,
+        memory_mib=usage.memory_mib,
+    )
+
+
 @router.post(
     "/observations",
     response_model=AgentObservationResponse,
     summary="Record a VM runtime observation",
     description=(
         "A node agent running inside a VM sends Kubernetes node capacity, "
-        "allocated requests, and the current container snapshot to the Broker."
+        "whole-node CPU and memory usage, allocated requests, and the current "
+        "container snapshot to the Broker."
     ),
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
@@ -135,6 +147,7 @@ def record_agent_observation(
             node_allocatable=_capacity(request.node_allocatable),
             allocated_requests=_capacity(request.allocated_requests),
             containers=containers,
+            node_usage=_usage(request.node_usage),
         )
     except ResourceTargetNotFoundError:
         return _error_response(
@@ -171,6 +184,14 @@ def record_agent_observation(
         containers_created=outcome.containers_created,
         containers_updated=outcome.containers_updated,
         containers_deleted=outcome.containers_deleted,
+        node_usage=(
+            AgentNodeUsage(
+                cpu_millicores=outcome.node_usage.cpu_millicores,
+                memory_mib=outcome.node_usage.memory_mib,
+            )
+            if outcome.node_usage is not None
+            else None
+        ),
         allocatable_capacity=AgentCapacity(
             cpu_millicores=outcome.allocatable_capacity.cpu_millicores,
             memory_mib=outcome.allocatable_capacity.memory_mib,

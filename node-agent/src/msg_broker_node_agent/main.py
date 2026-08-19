@@ -32,12 +32,17 @@ def _install_signal_handlers(stop_event: threading.Event) -> None:
 def _log_observation(payload: dict[str, object], *, dry_run: bool) -> None:
     node_allocatable = payload["node_allocatable"]
     allocated_requests = payload["allocated_requests"]
+    node_usage = payload["node_usage"]
     containers = payload["containers"]
     LOGGER.info(
-        "%sobservation node_allocatable=%s allocated_requests=%s containers=%d",
+        (
+            "%sobservation node_allocatable=%s allocated_requests=%s "
+            "node_usage=%s containers=%d"
+        ),
         "Dry-run " if dry_run else "Delivered ",
         node_allocatable,
         allocated_requests,
+        node_usage,
         len(containers) if isinstance(containers, list) else 0,
     )
 

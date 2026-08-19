@@ -19,6 +19,7 @@ from app.schemas.resource_target import (
     AdminRuntimeContainerResponse,
     ResourceCapacityResponse,
     ResourceRuntimeResponse,
+    ResourceUsageResponse,
 )
 from app.services.resource_target_service import (
     ResourceTargetNotFoundError,
@@ -91,6 +92,10 @@ def _resource_response(
             ready=resource.ready,
             observed_at=resource.runtime_observed_at,
             last_seen_at=resource.runtime_last_seen_at,
+            usage=ResourceUsageResponse(
+                cpu_millicores=resource.runtime_cpu_usage_millicores,
+                memory_mib=resource.runtime_memory_usage_mib,
+            ),
         ),
         enabled=resource.enabled,
         observed_at=resource.observed_at,

@@ -16,6 +16,11 @@ class ResourceCapacityResponse(ApiSchema):
     storage_mib: int | None = Field(default=None, ge=0)
 
 
+class ResourceUsageResponse(ApiSchema):
+    cpu_millicores: int | None = Field(default=None, ge=0)
+    memory_mib: int | None = Field(default=None, ge=0)
+
+
 class AdminResourceTargetUpdateRequest(ApiSchema):
     enabled: bool = Field(strict=True)
 
@@ -26,6 +31,7 @@ class ResourceRuntimeResponse(ApiSchema):
     ready: bool
     observed_at: datetime | None
     last_seen_at: datetime | None
+    usage: ResourceUsageResponse
 
 
 class AdminResourceTargetResponse(ApiSchema):

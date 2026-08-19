@@ -205,6 +205,24 @@ function CapacitySummary({ capacity, label = "사양", variant = "default" }) {
   );
 }
 
+function UsageSummary({ usage }) {
+  return (
+    <section className="capacity-summary capacity-usage">
+      <span className="capacity-label">VM 전체 실사용</span>
+      <div className="usage-metrics">
+        <div>
+          <span>CPU</span>
+          <strong>{formatCpu(usage?.cpu_millicores)}</strong>
+        </div>
+        <div>
+          <span>Memory</span>
+          <strong>{formatMib(usage?.memory_mib)}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function statusTone(value) {
   if (
     ["VALID", "SUFFICIENT", "AVAILABLE", "RUNNING"].includes(
@@ -847,7 +865,8 @@ function ResourceInventory({
             <span>환경</span>
             <span>Provider 전체 사양</span>
             <span />
-            <span>Allocatable</span>
+            <span>실질 가용량(예약 전)</span>
+            <span>VM 전체 실사용</span>
             <span>네트워크</span>
           </div>
           {resources.map((resource) => {
@@ -912,9 +931,12 @@ function ResourceInventory({
                 <div className="vm-list-capacity">
                   <CapacitySummary
                     capacity={resource.allocatable_capacity}
-                    label="Allocatable"
+                    label="실질 가용량(예약 전)"
                     variant="allocatable"
                   />
+                </div>
+                <div className="vm-list-capacity">
+                  <UsageSummary usage={resource.runtime?.usage} />
                 </div>
 
                 <section className="vm-list-network">

@@ -47,7 +47,7 @@ class ObservationSender:
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": "msg-broker-node-agent/0.1.0",
+                "User-Agent": "msg-broker-node-agent/0.2.0",
             },
             method="POST",
         )

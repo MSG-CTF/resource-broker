@@ -4,6 +4,7 @@
 `POST /v1/agent/observations`로 전송한다.
 
 - Node allocatable CPU, memory, ephemeral storage
+- VM 전체 CPU 사용량과 memory working set
 - 실행 중인 Pod의 합산 resource requests
 - 컨테이너별 CPU, memory, ephemeral-storage request
 - 컨테이너 identity, 상태, 실제 CPU/memory/storage usage
@@ -11,7 +12,32 @@
 
 Agent는 Kubernetes API만 사용한다. containerd socket이나 host PID/network를
 마운트하지 않는다. 실제 usage는 API server를 통한 Kubelet Summary API에서
-조회한다.
+조회한다. VM 전체 사용량은 Summary API의 node 통계에서 CPU
+`usageNanoCores`를 millicore로, memory `workingSetBytes`를 MiB로 변환한다.
+따라서 컨테이너 usage 합계가 아니라 OS, k3s, containerd와 workload를 포함한
+노드 단위 현재 사용량이다.
+
+Agent는 원본 관측값만 전송한다. 중앙 Broker는 CPU와 memory에 대해
+`min(node allocatable - workload requests, Provider capacity - node usage)`를
+실질 가용량으로 저장하고, 후보·예약 단계에서 아직 Agent 관측에 반영되지 않은
+Broker reservation을 추가로 차감한다. Ephemeral storage는 node allocatable과
+workload requests 기준 계산을 유지한다.
+
+Agent observation 요청에는 다음 필드가 포함된다.
+
+```json
+{
+  "node_usage": {
+    "cpu_millicores": 137,
+    "memory_mib": 486
+  }
+}
+```
+
+Admin `GET /v1/admin/resource-targets`에서는 같은 최신값을
+`runtime.usage.cpu_millicores`와 `runtime.usage.memory_mib`로 반환한다. 구버전
+Agent가 `node_usage`를 생략한 요청도 Backend는 수신하지만, 실제 사용량이
+수집될 때까지 해당 VM은 Scheduler 후보와 최종 reservation 대상에서 제외한다.
 
 운영동형 설치는 `deploy/bootstrap/node-agent-bootstrap.sh`를 사용한다. 이
 공통 Bootstrap이 Ubuntu AMD64/ARM64 VM에 지정 버전 k3s를 설치하고, VM-local CSR
@@ -30,12 +56,12 @@ ARM64 이미지를 하나의 multi-platform image index로 배포한다.
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  --tag <DOCKERHUB_USER>/msg-broker-node-agent:0.1.0 \
+  --tag <DOCKERHUB_USER>/msg-broker-node-agent:0.2.0 \
   --push \
   ./node-agent
 
 docker buildx imagetools inspect \
-  <DOCKERHUB_USER>/msg-broker-node-agent:0.1.0
+  <DOCKERHUB_USER>/msg-broker-node-agent:0.2.0
 ```
 
 운영 Bootstrap에는 tag가 아니라 registry가 반환한 `sha256` digest를 전달한다.

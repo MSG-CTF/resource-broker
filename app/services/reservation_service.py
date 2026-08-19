@@ -278,6 +278,10 @@ class ReservationService:
             or resource.target_id is None
             or resource.runtime_last_seen_at is None
             or resource.runtime_last_seen_at <= observed_after
+            or resource.provider_capacity_cpu_millicores is None
+            or resource.provider_capacity_memory_mib is None
+            or resource.runtime_cpu_usage_millicores is None
+            or resource.runtime_memory_usage_mib is None
             or resource.allocatable_cpu_millicores is None
             or resource.allocatable_memory_mib is None
             or resource.allocatable_ephemeral_storage_mib is None

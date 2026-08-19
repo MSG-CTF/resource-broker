@@ -190,6 +190,20 @@ class ResourceTargetTable(Base):
             ),
             name="allocatable_storage_non_negative",
         ),
+        CheckConstraint(
+            (
+                "runtime_cpu_usage_millicores IS NULL "
+                "OR runtime_cpu_usage_millicores >= 0"
+            ),
+            name="runtime_cpu_usage_non_negative",
+        ),
+        CheckConstraint(
+            (
+                "runtime_memory_usage_mib IS NULL "
+                "OR runtime_memory_usage_mib >= 0"
+            ),
+            name="runtime_memory_usage_non_negative",
+        ),
         Index(
             "ix_resource_targets_account_id",
             "account_id",
@@ -289,6 +303,14 @@ class ResourceTargetTable(Base):
         nullable=True,
     )
     allocatable_ephemeral_storage_mib: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    runtime_cpu_usage_millicores: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    runtime_memory_usage_mib: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
     )

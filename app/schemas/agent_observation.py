@@ -36,6 +36,11 @@ class AgentCapacity(ApiSchema):
     ephemeral_storage_mib: int = Field(ge=0, strict=True)
 
 
+class AgentNodeUsage(ApiSchema):
+    cpu_millicores: int | None = Field(default=None, ge=0, strict=True)
+    memory_mib: int | None = Field(default=None, ge=0, strict=True)
+
+
 class AgentRuntimeObservation(ApiSchema):
     type: Literal[RuntimeType.KUBERNETES]
     target_id: RuntimeIdentifier
@@ -67,6 +72,7 @@ class AgentObservationRequest(ApiSchema):
     runtime: AgentRuntimeObservation
     node_allocatable: AgentCapacity
     allocated_requests: AgentCapacity
+    node_usage: AgentNodeUsage | None = None
     containers: list[AgentContainerObservation] = Field(max_length=10_000)
 
     @field_validator("observed_at")
@@ -93,4 +99,5 @@ class AgentObservationResponse(ApiSchema):
     containers_created: int = Field(ge=0)
     containers_updated: int = Field(ge=0)
     containers_deleted: int = Field(ge=0)
+    node_usage: AgentNodeUsage | None
     allocatable_capacity: AgentCapacity

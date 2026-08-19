@@ -294,6 +294,7 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
     minmax(270px, 1.2fr)
     22px
     minmax(270px, 1.2fr)
+    minmax(190px, 0.9fr)
     minmax(180px, 0.85fr);
   align-items: center;
 }
@@ -377,10 +378,23 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
   text-transform: uppercase;
 }
 .capacity-allocatable .capacity-label { color: #31785f; }
+.capacity-usage .capacity-label { color: #9a6227; }
 .capacity-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+.usage-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.usage-metrics div { min-width: 0; display: grid; gap: 2px; }
+.usage-metrics span { color: #929caf; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.usage-metrics strong {
+  color: #16233d;
+  font-size: clamp(13px, 1.05vw, 17px);
+  line-height: 1.15;
 }
 .capacity-metrics div { min-width: 0; display: grid; gap: 2px; }
 .capacity-metrics span { color: #929caf; font-size: 8px; font-weight: 800; text-transform: uppercase; }

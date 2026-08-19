@@ -249,6 +249,19 @@ def _storage_usage_mib(container_summary: dict[str, Any]) -> int | None:
     return sum(values) // (1024 * 1024) if values else None
 
 
+def _node_usage(summary: dict[str, Any]) -> dict[str, int | None]:
+    node_summary = summary.get("node")
+    if not isinstance(node_summary, dict):
+        return {
+            "cpu_millicores": None,
+            "memory_mib": None,
+        }
+    return {
+        "cpu_millicores": _usage_millicores(node_summary.get("cpu")),
+        "memory_mib": _usage_mib(node_summary.get("memory")),
+    }
+
+
 def _summary_metric_indexes(
     summary: dict[str, Any],
 ) -> tuple[
@@ -493,5 +506,6 @@ class KubernetesCollector:
             "allocated_requests": _allocated_requests(pods).as_capacity(
                 round_up=True
             ),
+            "node_usage": _node_usage(summary),
             "containers": _container_observations(pods, summary),
         }

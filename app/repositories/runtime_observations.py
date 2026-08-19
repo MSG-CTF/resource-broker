@@ -61,6 +61,8 @@ class RuntimeObservationRepository:
         allocatable_cpu_millicores: int,
         allocatable_memory_mib: int,
         allocatable_ephemeral_storage_mib: int,
+        runtime_cpu_usage_millicores: int | None,
+        runtime_memory_usage_mib: int | None,
         containers: tuple[RuntimeContainerSnapshot, ...],
     ) -> RuntimeSnapshotWriteResult:
         statement = select(RuntimeContainerTable).where(
@@ -132,6 +134,8 @@ class RuntimeObservationRepository:
         resource.allocatable_ephemeral_storage_mib = (
             allocatable_ephemeral_storage_mib
         )
+        resource.runtime_cpu_usage_millicores = runtime_cpu_usage_millicores
+        resource.runtime_memory_usage_mib = runtime_memory_usage_mib
         resource.runtime_observed_at = observed_at
         resource.runtime_last_seen_at = accepted_at
 
