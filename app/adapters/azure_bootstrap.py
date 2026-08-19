@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import re
 import shlex
@@ -10,11 +10,14 @@ from app.adapters.azure import (
     AzureAdapterError,
     AzureDependencyError,
     AzureResourceNotFoundError,
+    GoogleIdTokenProvider,
     _azure_error_code,
     _azure_http_status,
     _optional_non_empty_string,
     _resource_id_component,
     _translate_azure_error,
+    azure_federated_credential,
+    google_metadata_id_token,
 )
 
 
@@ -66,9 +69,6 @@ class AzureVirtualMachineRunCommandsOperations(Protocol):
 class AzureBootstrapComputeClient(Protocol):
     virtual_machines: AzureVirtualMachinesOperations
     virtual_machine_run_commands: AzureVirtualMachineRunCommandsOperations
-
-
-GoogleIdTokenProvider = Callable[[str], str]
 
 
 class AzureBootstrapError(AzureAdapterError):
@@ -137,9 +137,6 @@ _RUN_COMMAND_NAME = re.compile(r"^[a-z][a-z0-9-]{2,62}$")
 _PENDING_STATES = frozenset({"unknown", "pending", "running"})
 _SUCCESS_STATES = frozenset({"succeeded"})
 _FAILED_STATES = frozenset({"failed", "timedout", "canceled", "cancelled"})
-_AZURE_TOKEN_EXCHANGE_AUDIENCE = "api://AzureADTokenExchange"
-
-
 def _require_non_empty_string(name: str, value: object) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a string")
@@ -148,23 +145,6 @@ def _require_non_empty_string(name: str, value: object) -> str:
     if value != value.strip():
         raise ValueError(f"{name} must not have surrounding whitespace")
     return value
-
-
-def _google_metadata_id_token(audience: str) -> str:
-    try:
-        from google.auth.compute_engine.credentials import IDTokenCredentials
-        from google.auth.transport.requests import Request
-    except ModuleNotFoundError as error:
-        raise AzureDependencyError("federation") from error
-
-    request = Request()
-    credentials = IDTokenCredentials(
-        request,
-        target_audience=_require_non_empty_string("audience", audience),
-        use_metadata_identity_endpoint=True,
-    )
-    credentials.refresh(request)
-    return _require_non_empty_string("google_id_token", credentials.token)
 
 
 def _normalized_enum_value(value: object) -> str | None:
@@ -232,27 +212,18 @@ class AzureBootstrapAdapter:
     def from_google_oidc(
         cls,
         target: AzureBootstrapTarget,
-        id_token_provider: GoogleIdTokenProvider = _google_metadata_id_token,
+        id_token_provider: GoogleIdTokenProvider = google_metadata_id_token,
     ) -> "AzureBootstrapAdapter":
         try:
-            from azure.identity import ClientAssertionCredential
             from azure.mgmt.compute import ComputeManagementClient
         except ModuleNotFoundError as error:
             raise AzureDependencyError(target.subscription_id) from error
 
         try:
-            credential = ClientAssertionCredential(
-                tenant_id=_require_non_empty_string(
-                    "tenant_id",
-                    target.tenant_id,
-                ),
-                client_id=_require_non_empty_string(
-                    "client_id",
-                    target.client_id,
-                ),
-                func=lambda: id_token_provider(
-                    _AZURE_TOKEN_EXCHANGE_AUDIENCE
-                ),
+            credential = azure_federated_credential(
+                target.tenant_id,
+                target.client_id,
+                id_token_provider,
             )
             return cls(
                 target,

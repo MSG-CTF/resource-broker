@@ -55,6 +55,10 @@ class AzureNetworkClient(Protocol):
 AzureCredentialFactory = Callable[..., object]
 AzureComputeClientFactory = Callable[..., AzureComputeClient]
 AzureNetworkClientFactory = Callable[..., AzureNetworkClient]
+GoogleIdTokenProvider = Callable[[str], str]
+
+
+AZURE_TOKEN_EXCHANGE_AUDIENCE = "api://AzureADTokenExchange"
 
 
 class AzureAdapterError(RuntimeError):
@@ -110,12 +114,49 @@ def _require_non_empty_string(name: str, value: object) -> str:
     return value
 
 
-def _require_secret(value: object) -> str:
-    if not isinstance(value, str):
-        raise TypeError("client_secret must be a string")
-    if not value:
-        raise ValueError("client_secret must not be empty")
-    return value
+def google_metadata_id_token(audience: str) -> str:
+    try:
+        from google.auth.compute_engine.credentials import IDTokenCredentials
+        from google.auth.transport.requests import Request
+    except ModuleNotFoundError as error:
+        raise AzureDependencyError("federation") from error
+
+    try:
+        request = Request()
+        credentials = IDTokenCredentials(
+            request,
+            target_audience=_require_non_empty_string(
+                "audience",
+                audience,
+            ),
+            use_metadata_identity_endpoint=True,
+        )
+        credentials.refresh(request)
+        return _require_non_empty_string(
+            "google_id_token",
+            credentials.token,
+        )
+    except AzureAdapterError:
+        raise
+    except Exception as error:
+        raise AzureAuthenticationError("federation") from error
+
+
+def azure_federated_credential(
+    tenant_id: str,
+    client_id: str,
+    id_token_provider: GoogleIdTokenProvider = google_metadata_id_token,
+) -> object:
+    try:
+        from azure.identity import ClientAssertionCredential
+    except ModuleNotFoundError as error:
+        raise AzureDependencyError("federation") from error
+
+    return ClientAssertionCredential(
+        tenant_id=_require_non_empty_string("tenant_id", tenant_id),
+        client_id=_require_non_empty_string("client_id", client_id),
+        func=lambda: id_token_provider(AZURE_TOKEN_EXCHANGE_AUDIENCE),
+    )
 
 
 def _optional_non_empty_string(value: object) -> str | None:
@@ -355,29 +396,28 @@ class AzureAdapter:
         self._loaded_sku_locations: set[str] = set()
 
     @classmethod
-    def from_client_secret(
+    def from_google_oidc(
         cls,
         tenant_id: str,
         client_id: str,
-        client_secret: str,
         subscription_id: str,
+        id_token_provider: GoogleIdTokenProvider = google_metadata_id_token,
     ) -> "AzureAdapter":
         normalized_subscription_id = _require_non_empty_string(
             "subscription_id",
             subscription_id,
         )
         try:
-            from azure.identity import ClientSecretCredential
             from azure.mgmt.compute import ComputeManagementClient
             from azure.mgmt.network import NetworkManagementClient
         except ModuleNotFoundError as error:
             raise AzureDependencyError(normalized_subscription_id) from error
 
         try:
-            credential = ClientSecretCredential(
-                tenant_id=_require_non_empty_string("tenant_id", tenant_id),
-                client_id=_require_non_empty_string("client_id", client_id),
-                client_secret=_require_secret(client_secret),
+            credential = azure_federated_credential(
+                tenant_id,
+                client_id,
+                id_token_provider,
             )
             return cls(
                 subscription_id=normalized_subscription_id,
@@ -390,6 +430,8 @@ class AzureAdapter:
                     subscription_id=normalized_subscription_id,
                 ),
             )
+        except AzureAdapterError:
+            raise
         except Exception as error:
             raise _translate_azure_error(
                 normalized_subscription_id,

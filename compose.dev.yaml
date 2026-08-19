@@ -4,8 +4,6 @@ services:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
 
   app:
-    environment:
-      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
     ports:
       - "127.0.0.1:${BROKER_PORT:-8000}:8000"
 

@@ -53,18 +53,14 @@ from app.repositories.provider_accounts import (
     ResourceSyncResult,
     ResourceTargetRepository,
 )
+from app.repositories.reservations import ReservationRepository
 
 
 GcpAdapterFactory = Callable[[str], GcpAdapter]
 AwsFederationFactory = Callable[[str, str, str], AwsFederation]
 AwsAdapterFactory = Callable[[str, AwsTemporaryCredentials], AwsAdapter]
-AzureAdapterFactory = Callable[[str, str, str, str], AzureAdapter]
-AzureClientSecretProvider = Callable[[], str | None]
+AzureAdapterFactory = Callable[[str, str, str], AzureAdapter]
 AwsSettingProvider = Callable[[], str | None]
-
-
-def _azure_client_secret_from_environment() -> str | None:
-    return os.getenv("AZURE_CLIENT_SECRET")
 
 
 def _aws_hub_role_arn_from_environment() -> str | None:
@@ -92,6 +88,10 @@ class InvalidProviderAccountConfigError(ValueError):
 
 
 class ProviderAccountHasActiveBootstrapJobsError(ValueError):
+    pass
+
+
+class ProviderAccountHasActiveReservationsError(ValueError):
     pass
 
 
@@ -156,16 +156,14 @@ class ProviderAccountService:
             _aws_sts_region_from_environment
         ),
         azure_adapter_factory: AzureAdapterFactory = (
-            AzureAdapter.from_client_secret
-        ),
-        azure_client_secret_provider: AzureClientSecretProvider = (
-            _azure_client_secret_from_environment
+            AzureAdapter.from_google_oidc
         ),
     ) -> None:
         self._session = session
         self._accounts = ProviderAccountRepository(session)
         self._resources = ResourceTargetRepository(session)
         self._bootstrap_jobs = BootstrapJobRepository(session)
+        self._reservations = ReservationRepository(session)
         self._gcp_adapter_factory = gcp_adapter_factory
         self._aws_federation_factory = aws_federation_factory
         self._aws_adapter_factory = aws_adapter_factory
@@ -175,7 +173,6 @@ class ProviderAccountService:
         )
         self._aws_sts_region_provider = aws_sts_region_provider
         self._azure_adapter_factory = azure_adapter_factory
-        self._azure_client_secret_provider = azure_client_secret_provider
         self._verify_handlers = {
             Provider.GCP: self._verify_gcp,
             Provider.AWS: self._verify_aws,
@@ -199,11 +196,11 @@ class ProviderAccountService:
         auth_method = {
             Provider.GCP: "ADC",
             Provider.AWS: "GOOGLE_OIDC_STS",
-            Provider.AZURE: "CLIENT_SECRET",
+            Provider.AZURE: "GOOGLE_OIDC_CLIENT_ASSERTION",
         }.get(provider, "NOT_CONFIGURED")
         credential_reference = {
             Provider.AWS: "env://AWS_FEDERATION_HUB_ROLE_ARN",
-            Provider.AZURE: "env://AZURE_CLIENT_SECRET",
+            Provider.AZURE: "federated://gcp-attached-service-account",
         }.get(provider)
         account = ProviderAccountTable(
             provider=provider,
@@ -244,6 +241,8 @@ class ProviderAccountService:
         account = self._get_account(account_id, for_update=True)
         if self._bootstrap_jobs.has_active_for_account(account.account_id):
             raise ProviderAccountHasActiveBootstrapJobsError
+        if self._reservations.has_active_for_account(account.account_id):
+            raise ProviderAccountHasActiveReservationsError
         deleted_resource_count = self._resources.delete_by_account_id(
             account.account_id
         )
@@ -575,14 +574,6 @@ class ProviderAccountService:
             )
         return tuple(raw_subscription_ids)
 
-    def _azure_client_secret(self) -> str:
-        client_secret = self._azure_client_secret_provider()
-        if not isinstance(client_secret, str) or not client_secret:
-            raise InvalidProviderAccountConfigError(
-                "The Azure client secret is not configured."
-            )
-        return client_secret
-
     @staticmethod
     def _required_aws_setting(
         provider: AwsSettingProvider,
@@ -720,7 +711,10 @@ class ProviderAccountService:
     ]:
         tenant_id = account.external_account_id
         client_id = self._azure_client_id(account)
-        client_secret = self._azure_client_secret()
+        account.auth_method = "GOOGLE_OIDC_CLIENT_ASSERTION"
+        account.credential_reference = (
+            "federated://gcp-attached-service-account"
+        )
         inspections: list[ProviderScopeInspection] = []
         instances: list[ProviderInstanceSummary] = []
 
@@ -729,7 +723,6 @@ class ProviderAccountService:
                 subscription_instances = self._azure_adapter_factory(
                     tenant_id,
                     client_id,
-                    client_secret,
                     subscription_id,
                 ).list_instances()
             except AzureAdapterError as error:
