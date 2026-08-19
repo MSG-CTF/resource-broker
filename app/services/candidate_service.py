@@ -12,6 +12,9 @@ from app.repositories.reservations import (
 from app.services.scheduler_settings import SchedulerSettings
 
 
+CANDIDATE_RESULT_LIMIT = 50
+
+
 @dataclass(frozen=True, slots=True)
 class CandidateMatch:
     resource: ResourceTargetTable
@@ -45,7 +48,6 @@ class CandidateService:
         memory_mib: int,
         ephemeral_storage_mib: int,
         architecture: Architecture,
-        max_candidates: int,
     ) -> CandidateQueryOutcome:
         now = datetime.now(UTC)
         observed_after = now - timedelta(
@@ -125,7 +127,7 @@ class CandidateService:
                 str(item.resource.resource_target_id),
             )
         )
-        selected = tuple(matches[:max_candidates])
+        selected = tuple(matches[:CANDIDATE_RESULT_LIMIT])
         return CandidateQueryOutcome(
             generated_at=now,
             status=(

@@ -52,10 +52,12 @@ Request:
     "memory_mib": 1024,
     "ephemeral_storage_mib": 2048,
     "architecture": "AMD64"
-  },
-  "max_candidates": 50
+  }
 }
 ```
+
+The Broker returns at most 50 candidates. The result limit is controlled by
+the Broker and is not part of the Scheduler request.
 
 Response:
 
