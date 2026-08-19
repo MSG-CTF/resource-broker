@@ -17,6 +17,8 @@ import {
   verifyProviderAccount,
 } from "./api/providerAccounts.js";
 
+const DEFAULT_K3S_VERSION = "v1.33.3+k3s1";
+
 const PROVIDER_DEFINITIONS = {
   GCP: {
     label: "Google Cloud",
@@ -673,7 +675,7 @@ function ResourceInventory({
   const [bootstrapError, setBootstrapError] = useState(null);
   const [bootstrapAction, setBootstrapAction] = useState("INSTALL");
   const [bootstrapVersion, setBootstrapVersion] = useState("0.4.0");
-  const [k3sVersion, setK3sVersion] = useState("");
+  const [k3sVersion, setK3sVersion] = useState(DEFAULT_K3S_VERSION);
   const [agentImage, setAgentImage] = useState("");
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
   const [bootstrapReloadKey, setBootstrapReloadKey] = useState(0);
@@ -1005,13 +1007,15 @@ function ResourceInventory({
                         ? "Ubuntu AMD64/ARM64 VM에 임시 작업 라벨과 OS Policy를 만들고 완료 후 자동 제거합니다."
                         : selectedResource.provider === "AWS"
                           ? "SSM online 상태이며 msg-broker-bootstrap=enabled 태그가 있는 Ubuntu AMD64/ARM64 EC2에서 실행됩니다."
+                          : selectedResource.provider === "AZURE"
+                            ? "Azure VM Agent가 준비되고 msg-broker-bootstrap=enabled 태그가 있는 Ubuntu AMD64/ARM64 VM에서 Run Command로 실행됩니다."
                           : "현재 공통 Bootstrap은 Ubuntu AMD64/ARM64를 지원합니다."}
                     </p>
                   </div>
                   <strong>{bootstrapLoading ? "조회 중" : `${bootstrapJobs.length}건`}</strong>
                 </header>
 
-                {["GCP", "AWS"].includes(selectedResource.provider) ? (
+                {["GCP", "AWS", "AZURE"].includes(selectedResource.provider) ? (
                   <form className="bootstrap-job-form" onSubmit={handleBootstrapSubmit}>
                     <label>
                       <span>작업</span>
