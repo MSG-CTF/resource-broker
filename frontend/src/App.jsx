@@ -14,10 +14,12 @@ import {
   loginAdmin,
   setAdminToken,
   syncProviderAccount,
+  updateResourceTargetCandidateRegistration,
   verifyProviderAccount,
 } from "./api/providerAccounts.js";
 
 const DEFAULT_K3S_VERSION = "v1.33.3+k3s1";
+const CANDIDATE_OBSERVATION_STALE_MS = 10 * 60 * 1000;
 
 const PROVIDER_DEFINITIONS = {
   GCP: {
@@ -183,9 +185,17 @@ function formatMib(value) {
   return `${new Intl.NumberFormat("en-US").format(value)} MiB`;
 }
 
-function CapacitySummary({ capacity, label = "사양", variant = "default" }) {
+function CapacitySummary({
+  capacity,
+  label = "사양",
+  variant = "default",
+  description,
+}) {
   return (
-    <section className={`capacity-summary capacity-${variant}`}>
+    <section
+      className={`capacity-summary capacity-${variant}`}
+      title={description}
+    >
       <span className="capacity-label">{label}</span>
       <div className="capacity-metrics">
         <div>
@@ -207,8 +217,11 @@ function CapacitySummary({ capacity, label = "사양", variant = "default" }) {
 
 function UsageSummary({ usage }) {
   return (
-    <section className="capacity-summary capacity-usage">
-      <span className="capacity-label">VM 전체 실사용</span>
+    <section
+      className="capacity-summary capacity-usage"
+      title="Node Agent가 관측한 OS, k3s, Pod를 포함한 VM 전체의 실제 CPU·메모리 사용량입니다."
+    >
+      <span className="capacity-label">VM 전체 실제 사용량</span>
       <div className="usage-metrics">
         <div>
           <span>CPU</span>
@@ -220,6 +233,116 @@ function UsageSummary({ usage }) {
         </div>
       </div>
     </section>
+  );
+}
+
+const CANDIDATE_REASON_LABELS = {
+  PROVIDER_ACCOUNT_DISABLED: "Provider 계정이 사용 중지됨",
+  RESOURCE_TARGET_RETIRED: "동기화 대상에서 제외된 VM",
+  RUNTIME_NOT_READY: "Runtime 준비 안 됨",
+  ARCHITECTURE_NOT_OBSERVED: "아키텍처 미수집",
+  RUNTIME_TARGET_NOT_OBSERVED: "Runtime target 미수집",
+  RUNTIME_OBSERVATION_MISSING: "Agent 관측 없음",
+  RUNTIME_OBSERVATION_STALE: "Agent heartbeat 만료",
+  PROVIDER_CAPACITY_NOT_OBSERVED: "Provider CPU·메모리 미수집",
+  RUNTIME_USAGE_NOT_OBSERVED: "VM 실제 사용량 미수집",
+  ALLOCATABLE_CAPACITY_NOT_OBSERVED: "배치 가능량 미수집",
+};
+
+function candidateRegistrationReasons(resource) {
+  const reasons = [];
+  if (resource.account_enabled === false) {
+    reasons.push("PROVIDER_ACCOUNT_DISABLED");
+  }
+  if (resource.retired_at) reasons.push("RESOURCE_TARGET_RETIRED");
+  if (!resource.runtime?.ready) reasons.push("RUNTIME_NOT_READY");
+  if (!resource.architecture) reasons.push("ARCHITECTURE_NOT_OBSERVED");
+  if (!resource.runtime?.type || !resource.runtime?.target_id) {
+    reasons.push("RUNTIME_TARGET_NOT_OBSERVED");
+  }
+
+  const lastSeenAt = resource.runtime?.last_seen_at;
+  if (!resource.runtime?.observed_at || !lastSeenAt) {
+    reasons.push("RUNTIME_OBSERVATION_MISSING");
+  } else {
+    const observedAt = Date.parse(lastSeenAt);
+    if (
+      Number.isNaN(observedAt) ||
+      Date.now() - observedAt >= CANDIDATE_OBSERVATION_STALE_MS
+    ) {
+      reasons.push("RUNTIME_OBSERVATION_STALE");
+    }
+  }
+
+  if (
+    resource.provider_capacity?.cpu_millicores == null ||
+    resource.provider_capacity?.memory_mib == null
+  ) {
+    reasons.push("PROVIDER_CAPACITY_NOT_OBSERVED");
+  }
+  if (
+    resource.runtime?.usage?.cpu_millicores == null ||
+    resource.runtime?.usage?.memory_mib == null
+  ) {
+    reasons.push("RUNTIME_USAGE_NOT_OBSERVED");
+  }
+  if (
+    resource.allocatable_capacity?.cpu_millicores == null ||
+    resource.allocatable_capacity?.memory_mib == null ||
+    resource.allocatable_capacity?.storage_mib == null
+  ) {
+    reasons.push("ALLOCATABLE_CAPACITY_NOT_OBSERVED");
+  }
+  return reasons;
+}
+
+function CandidateRegistrationControl({
+  resource,
+  submitting,
+  onChange,
+}) {
+  const reasons = candidateRegistrationReasons(resource);
+  const eligible = reasons.length === 0;
+  const registered = resource.enabled;
+  const label = registered
+    ? eligible
+      ? "후보 등록됨"
+      : "등록됨 · 현재 사용 불가"
+    : eligible
+      ? "후보 등록 가능"
+      : "후보 등록 불가";
+  const reasonText = reasons
+    .map((reason) => CANDIDATE_REASON_LABELS[reason] || reason)
+    .join(" · ");
+
+  return (
+    <div className="candidate-registration-control">
+      <StatusBadge
+        value={registered ? (eligible ? "AVAILABLE" : "UNKNOWN") : "TERMINATED"}
+        label={label}
+      />
+      {reasonText && (
+        <span className="candidate-registration-reason" title={reasonText}>
+          {reasonText}
+        </span>
+      )}
+      <button
+        className={`button ${registered ? "button-ghost" : "button-primary"}`}
+        type="button"
+        disabled={submitting || (!registered && !eligible)}
+        title={!registered && !eligible ? reasonText : undefined}
+        onClick={(event) => {
+          event.stopPropagation();
+          onChange(resource, !registered);
+        }}
+      >
+        {submitting
+          ? "처리 중..."
+          : registered
+            ? "후보 등록 해제"
+            : "후보 등록"}
+      </button>
+    </div>
   );
 }
 
@@ -680,7 +803,9 @@ function ResourceInventory({
   resources,
   loading,
   provider,
+  actionState,
   onProviderChange,
+  onCandidateRegistrationChange,
   onRefresh,
 }) {
   const [selectedResource, setSelectedResource] = useState(null);
@@ -697,6 +822,7 @@ function ResourceInventory({
   const [agentImage, setAgentImage] = useState("");
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
   const [bootstrapReloadKey, setBootstrapReloadKey] = useState(0);
+  const [registrationFilter, setRegistrationFilter] = useState("");
 
   useEffect(() => {
     if (!selectedResource) return undefined;
@@ -824,6 +950,15 @@ function ResourceInventory({
         : selectedResource?.provider === "AWS"
           ? "AWS Region"
           : "Scope ID";
+  const visibleResources = useMemo(() => {
+    if (registrationFilter === "registered") {
+      return resources.filter((resource) => resource.enabled);
+    }
+    if (registrationFilter === "unregistered") {
+      return resources.filter((resource) => !resource.enabled);
+    }
+    return resources;
+  }, [registrationFilter, resources]);
 
   return (
     <section className="panel resources-panel" aria-labelledby="inventory-title">
@@ -831,7 +966,10 @@ function ResourceInventory({
         <div>
           <span className="eyebrow">Database snapshot</span>
           <h2 id="inventory-title">전체 VM 인벤토리</h2>
-          <p>Cloud API를 다시 호출하지 않고 Broker DB 값을 표시합니다.</p>
+          <p>
+            Cloud API를 다시 호출하지 않고 Broker DB 값을 표시합니다. Scheduler
+            배치 가능량은 Pod requests 기준과 VM 실사용 기준 중 작은 값입니다.
+          </p>
         </div>
         <div className="inventory-controls">
           <select
@@ -846,6 +984,15 @@ function ResourceInventory({
               </option>
             ))}
           </select>
+          <select
+            value={registrationFilter}
+            onChange={(event) => setRegistrationFilter(event.target.value)}
+            aria-label="후보 등록 상태 필터"
+          >
+            <option value="">전체 등록 상태</option>
+            <option value="registered">후보 등록 VM</option>
+            <option value="unregistered">후보 미등록 VM</option>
+          </select>
           <button className="button button-ghost" type="button" onClick={onRefresh}>
             새로고침
           </button>
@@ -858,6 +1005,10 @@ function ResourceInventory({
         <div className="empty-inline">
           저장된 VM이 없습니다. 계정을 동기화하면 이곳에 표시됩니다.
         </div>
+      ) : visibleResources.length === 0 ? (
+        <div className="empty-inline">
+          현재 등록 상태 필터에 해당하는 VM이 없습니다.
+        </div>
       ) : (
         <div className="vm-list">
           <div className="vm-list-header" aria-hidden="true">
@@ -865,11 +1016,11 @@ function ResourceInventory({
             <span>환경</span>
             <span>Provider 전체 사양</span>
             <span />
-            <span>실질 가용량(예약 전)</span>
-            <span>VM 전체 실사용</span>
+            <span>Scheduler 배치 가능량(예약 전)</span>
+            <span>VM 전체 실제 사용량</span>
             <span>네트워크</span>
           </div>
-          {resources.map((resource) => {
+          {visibleResources.map((resource) => {
             const definition =
               PROVIDER_DEFINITIONS[resource.provider] ||
               PROVIDER_DEFINITIONS.GCP;
@@ -882,6 +1033,7 @@ function ResourceInventory({
                 aria-label={`${resource.name || "이름 없는 VM"} 상세 정보 열기`}
                 onClick={() => setSelectedResource(resource)}
                 onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
                     setSelectedResource(resource);
@@ -903,6 +1055,14 @@ function ResourceInventory({
                   <div className="vm-status">
                     <StatusBadge value={resource.status || "UNKNOWN"} />
                     {resource.retired_at && <span>Retired</span>}
+                    <CandidateRegistrationControl
+                      resource={resource}
+                      submitting={
+                        actionState ===
+                        `candidate:${resource.resource_target_id}`
+                      }
+                      onChange={onCandidateRegistrationChange}
+                    />
                   </div>
                 </section>
 
@@ -931,8 +1091,9 @@ function ResourceInventory({
                 <div className="vm-list-capacity">
                   <CapacitySummary
                     capacity={resource.allocatable_capacity}
-                    label="실질 가용량(예약 전)"
+                    label="Scheduler 배치 가능량(예약 전)"
                     variant="allocatable"
+                    description="Node allocatable에서 Pod requests를 뺀 값과 Provider 전체 사양에서 VM 실제 사용량을 뺀 값 중 더 작은 값입니다. Broker reservation은 아직 차감하지 않았습니다."
                   />
                 </div>
                 <div className="vm-list-capacity">
@@ -1255,6 +1416,7 @@ function AdminDashboard({ onLogout }) {
     const running = resources.filter(
       (resource) => resource.status?.toUpperCase() === "RUNNING",
     ).length;
+    const registered = resources.filter((resource) => resource.enabled).length;
     const totalCpuMillicores = resources.reduce(
       (sum, resource) =>
         sum + (resource.provider_capacity?.cpu_millicores || 0),
@@ -1272,6 +1434,7 @@ function AdminDashboard({ onLogout }) {
         0,
       ),
       running,
+      registered,
       resourceTotal: resources.length,
       totalCpuMillicores,
       totalMemoryMib,
@@ -1348,6 +1511,44 @@ function AdminDashboard({ onLogout }) {
       );
       await loadAccounts();
       await loadResources();
+    } catch (requestError) {
+      setError(requestError);
+    } finally {
+      setActionState(null);
+    }
+  }
+
+  async function handleCandidateRegistration(resource, enabled) {
+    const resourceName = resource.name || resource.instance_id;
+    if (
+      !enabled &&
+      !window.confirm(
+        `"${resourceName}" VM을 후보 등록에서 해제할까요?\n\n신규 배치 후보에서만 제외되며 실행 중인 workload와 reservation은 변경하지 않습니다.`,
+      )
+    ) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setActionState(`candidate:${resource.resource_target_id}`);
+    try {
+      const updated = await updateResourceTargetCandidateRegistration(
+        resource.resource_target_id,
+        enabled,
+      );
+      setResources((current) =>
+        current.map((item) =>
+          item.resource_target_id === updated.resource_target_id
+            ? updated
+            : item,
+        ),
+      );
+      setNotice(
+        enabled
+          ? `${resourceName} VM을 Scheduler 후보로 등록했습니다.`
+          : `${resourceName} VM의 Scheduler 후보 등록을 해제했습니다.`,
+      );
     } catch (requestError) {
       setError(requestError);
     } finally {
@@ -1474,6 +1675,7 @@ function AdminDashboard({ onLogout }) {
               <section className="metric-grid metric-grid-resources" aria-label="VM 요약">
                 <article><span>조회된 VM</span><strong>{metrics.resourceTotal}</strong><small>현재 필터 기준</small></article>
                 <article><span>실행 중 VM</span><strong>{metrics.running}</strong><small>provider state RUNNING</small></article>
+                <article><span>후보 등록 VM</span><strong>{metrics.registered}</strong><small>enabled=true</small></article>
                 <article><span>전체 CPU</span><strong>{formatCpu(metrics.totalCpuMillicores)}</strong><small>provider capacity 합계</small></article>
                 <article><span>전체 Memory</span><strong>{formatMib(metrics.totalMemoryMib)}</strong><small>provider capacity 합계</small></article>
               </section>
@@ -1483,7 +1685,9 @@ function AdminDashboard({ onLogout }) {
                 resources={resources}
                 loading={resourceLoading}
                 provider={resourceProvider}
+                actionState={actionState}
                 onProviderChange={setResourceProvider}
+                onCandidateRegistrationChange={handleCandidateRegistration}
                 onRefresh={loadResources}
               />
             </>

@@ -115,6 +115,7 @@ main { width: min(1580px, calc(100% - 48px)); margin: 0 auto; padding: 32px 0 64
 .metric-grid strong { display: block; margin: 10px 0 3px; color: #15213a; font-size: 32px; letter-spacing: -0.04em; }
 .metric-grid small { color: #98a1b2; font-size: 11px; }
 .metric-grid-accounts { grid-template-columns: repeat(3, 1fr); }
+.metric-grid-resources { grid-template-columns: repeat(5, 1fr); }
 
 .file-navigation {
   position: relative;
@@ -289,7 +290,7 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 .vm-list-row {
   display: grid;
   grid-template-columns:
-    minmax(210px, 1.2fr)
+    minmax(285px, 1.35fr)
     minmax(175px, 0.9fr)
     minmax(270px, 1.2fr)
     22px
@@ -336,6 +337,28 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 .vm-identity p { max-width: 280px; margin: 0; color: #8a95a7; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vm-status { display: grid; justify-items: end; gap: 5px; }
 .vm-status > span:last-child:not(.status-badge) { color: #a24b4b; font-size: 9px; font-weight: 800; }
+.candidate-registration-control {
+  max-width: 145px;
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+.candidate-registration-control .button {
+  min-height: 28px;
+  padding: 5px 8px;
+  font-size: 9px;
+}
+.candidate-registration-reason {
+  width: 100%;
+  color: #8a641b;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .vm-list-environment {
   min-width: 0;
   min-height: 86px;

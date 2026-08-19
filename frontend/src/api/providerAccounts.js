@@ -81,6 +81,19 @@ export function listResourceTargets({ provider = "" } = {}) {
   return request(`/v1/admin/resource-targets?${query.toString()}`);
 }
 
+export function updateResourceTargetCandidateRegistration(
+  resourceTargetId,
+  enabled,
+) {
+  return request(
+    `/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    },
+  );
+}
+
 export function listResourceTargetContainers(resourceTargetId, { signal } = {}) {
   return request(
     `/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/containers`,

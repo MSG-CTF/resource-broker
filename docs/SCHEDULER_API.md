@@ -140,14 +140,27 @@ deletion.
 ## Enable a VM for candidates
 
 Newly synchronized VMs default to `enabled: false`. An Admin explicitly enables
-a VM after Bootstrap and Runtime observation are ready.
+a VM after Bootstrap and Runtime observation are ready. Provider sync preserves
+the existing value and never enables a VM automatically.
+
+The Admin dashboard exposes this operation as `후보 등록` and
+`후보 등록 해제`. Its registration filter defines the candidate pool as the
+set of VMs with `enabled: true`. Candidate queries still apply current Runtime
+readiness, observation freshness, architecture, capacity, and reservation
+checks to that pool.
 
 - Method: `PATCH`
 - Path: `/v1/admin/resource-targets/{resource_target_id}`
 - Authentication: Admin Bearer JWT
 - Body: `{ "enabled": true }`
 - Success: `200`
-- Errors: `401`, `404`, `422`, `500`
+- Errors: `401`, `404`, `409`, `422`, `500`, `503`
+
+Registration with `enabled: true` is rejected with `409` unless the Provider
+account is enabled, the VM is not retired, Runtime is ready, the observation is
+fresh, and Provider capacity, whole-node usage, and allocatable capacity are
+all present. Setting `enabled: false` always stops new candidate placement and
+does not delete running workloads or active reservations.
 
 ## Error format
 

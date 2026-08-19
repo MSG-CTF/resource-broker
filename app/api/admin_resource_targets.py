@@ -22,9 +22,11 @@ from app.schemas.resource_target import (
     ResourceUsageResponse,
 )
 from app.services.resource_target_service import (
+    ResourceTargetNotEligibleError,
     ResourceTargetNotFoundError,
     ResourceTargetService,
 )
+from app.services.scheduler_settings import SchedulerConfigurationError
 
 
 router = APIRouter(
@@ -97,6 +99,7 @@ def _resource_response(
                 memory_mib=resource.runtime_memory_usage_mib,
             ),
         ),
+        account_enabled=account.enabled,
         enabled=resource.enabled,
         observed_at=resource.observed_at,
         last_seen_at=resource.last_seen_at,
@@ -173,6 +176,7 @@ def list_resource_targets(
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
         status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
@@ -193,6 +197,14 @@ def update_resource_target(
             status.HTTP_404_NOT_FOUND,
             "RESOURCE_TARGET_NOT_FOUND",
             "The resource target was not found.",
+        )
+    except ResourceTargetNotEligibleError as error:
+        return _error_response(409, error.code, error.message)
+    except SchedulerConfigurationError:
+        return _error_response(
+            503,
+            "SCHEDULER_NOT_CONFIGURED",
+            "Scheduler capacity settings are not configured.",
         )
     except SQLAlchemyError:
         session.rollback()

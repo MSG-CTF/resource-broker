@@ -53,6 +53,7 @@ class AdminResourceTargetResponse(ApiSchema):
     provider_capacity: ResourceCapacityResponse
     allocatable_capacity: ResourceCapacityResponse
     runtime: ResourceRuntimeResponse
+    account_enabled: bool
     enabled: bool
     observed_at: datetime
     last_seen_at: datetime
