@@ -400,14 +400,6 @@ class ReservationTable(Base):
             "ephemeral_storage_mib > 0",
             name="ephemeral_storage_positive",
         ),
-        CheckConstraint(
-            "team_id > 0",
-            name="team_id_positive",
-        ),
-        CheckConstraint(
-            "challenge_id > 0",
-            name="challenge_id_positive",
-        ),
         Index(
             "ix_reservations_target_status",
             "resource_target_id",
@@ -444,8 +436,14 @@ class ReservationTable(Base):
         ),
         nullable=False,
     )
-    team_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    challenge_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    team_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        nullable=False,
+    )
+    challenge_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        nullable=False,
+    )
     instance_id: Mapped[str] = mapped_column(String(255), nullable=False)
     cpu_millicores: Mapped[int] = mapped_column(Integer, nullable=False)
     memory_mib: Mapped[int] = mapped_column(Integer, nullable=False)

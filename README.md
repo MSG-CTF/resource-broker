@@ -146,3 +146,22 @@ docker compose -f compose.yaml -f compose.dev.yaml down
 ```
 
 `down -v`는 PostgreSQL 데이터를 삭제하므로 명시적인 초기화 때만 사용한다.
+
+## Scheduler API smoke 검증
+
+후보 조회, 후보 선택, 예약, Runtime 성공 가정, commit, release까지 검증하는
+CLI는 `tools/scheduler_smoke.py`다. 배포된 app 컨테이너의 Scheduler token을
+그대로 사용하므로 토큰을 명령행에 입력하지 않는다.
+
+```bash
+sudo docker compose exec app python tools/scheduler_smoke.py \
+  --provider AWS \
+  --cpu-millicores 500 \
+  --memory-mib 500 \
+  --ephemeral-storage-mib 2048 \
+  --architecture AMD64
+```
+
+실제 Runtime workload를 만들지 않기 때문에 `COMMITTED` 확인 후 예약을 항상
+`RELEASED`로 정리한다. 상세 옵션과 기대 상태는 `docs/SCHEDULER_API.md`를
+참고한다.

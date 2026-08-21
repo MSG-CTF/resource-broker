@@ -36,8 +36,8 @@ class ReservationCreateRequest(ApiSchema):
     idempotency_key: IdempotencyKey
     request_id: NonEmptyString
     candidate_id: UUID
-    team_id: int = Field(gt=0, strict=True)
-    challenge_id: int = Field(gt=0, strict=True)
+    team_id: UUID
+    challenge_id: UUID
     instance_id: NonEmptyString
     resource_profile: ResourceProfile
 
@@ -54,8 +54,8 @@ class ReservationResponse(ApiSchema):
     request_id: NonEmptyString
     candidate_id: UUID
     target_id: NonEmptyString
-    team_id: int
-    challenge_id: int
+    team_id: UUID
+    challenge_id: UUID
     instance_id: NonEmptyString
     resource_profile: ReservationCapacity
     status: ReservationStatus

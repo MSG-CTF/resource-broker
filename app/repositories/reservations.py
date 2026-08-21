@@ -153,7 +153,7 @@ class ReservationRepository:
     def get_active_for_instance(
         self,
         *,
-        team_id: int,
+        team_id: UUID,
         instance_id: str,
     ) -> ReservationTable | None:
         statement = select(ReservationTable).where(
@@ -202,7 +202,7 @@ class ReservationRepository:
     def expire_held_for_instance(
         self,
         *,
-        team_id: int,
+        team_id: UUID,
         instance_id: str,
         now: datetime,
     ) -> int:

@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 from pydantic import (
     AwareDatetime,
@@ -36,7 +37,7 @@ class ResourceProfile(RequestSchema):
 class CandidateQueryRequest(RequestSchema):
     request_id: NonEmptyString
     requested_at: AwareDatetime
-    team_id: int = Field(gt=0, strict=True)
-    challenge_id: int = Field(gt=0, strict=True)
+    team_id: UUID
+    challenge_id: UUID
     instance_id: NonEmptyString
     resource_profile: ResourceProfile
