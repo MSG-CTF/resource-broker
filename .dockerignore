@@ -13,6 +13,7 @@ __pycache__
 venv
 tests
 scripts
+tools
 explain
 *.log
 *.tmp

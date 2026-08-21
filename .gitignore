@@ -6,6 +6,7 @@
 /tests
 /scripts
 /explain
+/tools/scheduler_smoke.py
 
 #환경변수
 .env

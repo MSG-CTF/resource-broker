@@ -13,7 +13,6 @@ RUN apt-get update \
 
 COPY pyproject.toml ./
 COPY app ./app
-COPY tools ./tools
 COPY deploy/bootstrap ./deploy/bootstrap
 COPY node-agent/k8s ./node-agent/k8s
 
