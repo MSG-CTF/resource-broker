@@ -23,8 +23,10 @@ STATE_FILE="${STATE_DIR}/node-agent.state"
 RENEW_BEFORE_SECONDS="${MSG_BROKER_CERT_RENEW_BEFORE_SECONDS:-604800}"
 DELIVERY_TIMEOUT_SECONDS="${MSG_BROKER_DELIVERY_TIMEOUT_SECONDS:-90}"
 VERIFY_DELIVERY="${MSG_BROKER_VERIFY_DELIVERY:-true}"
-K3S_INSTALL_URL="${MSG_BROKER_K3S_INSTALL_URL:-https://get.k3s.io}"
-K3S_INSTALL_SHA256="${MSG_BROKER_K3S_INSTALL_SHA256:-ed01f89fd977bf20ac1516bbebf8370bf3ddbaa55dac8aba610956a4c78cc00b}"
+# Pin the installer source independently from the requested k3s binary version.
+# Upstream k3s-io/k3s commit dated 2026-09-03; see README.md for provenance.
+K3S_INSTALL_URL="${MSG_BROKER_K3S_INSTALL_URL:-https://raw.githubusercontent.com/k3s-io/k3s/2977c525a2e7a487886107ce4df43630ae9b03b2/install.sh}"
+K3S_INSTALL_SHA256="${MSG_BROKER_K3S_INSTALL_SHA256:-e5cc3b3d9dfc1662c2d9be6da5abc9a4cd317d6abc3a5ffc02e3dd3248207fee}"
 K3S_ADMIN_KUBECONFIG_FILE="${MSG_BROKER_K3S_ADMIN_KUBECONFIG_FILE:-/etc/rancher/k3s/k3s.yaml}"
 K3S_CREDENTIAL_UPLOAD_URL="${MSG_BROKER_K3S_CREDENTIAL_UPLOAD_URL:-}"
 K3S_SERVER_URL="${MSG_BROKER_K3S_SERVER_URL:-}"
@@ -67,8 +69,8 @@ Required settings for install/update:
   MSG_BROKER_AGENT_IMAGE=<repository>@sha256:<64-hex-digest>
 
 Pinned k3s installer defaults:
-  MSG_BROKER_K3S_INSTALL_URL=https://get.k3s.io
-  MSG_BROKER_K3S_INSTALL_SHA256=ed01f89fd977bf20ac1516bbebf8370bf3ddbaa55dac8aba610956a4c78cc00b
+  MSG_BROKER_K3S_INSTALL_URL=https://raw.githubusercontent.com/k3s-io/k3s/2977c525a2e7a487886107ce4df43630ae9b03b2/install.sh
+  MSG_BROKER_K3S_INSTALL_SHA256=e5cc3b3d9dfc1662c2d9be6da5abc9a4cd317d6abc3a5ffc02e3dd3248207fee
 
 Required for token enrollment when no usable certificate is already installed:
   MSG_BROKER_ENROLLMENT_TOKEN_FILE=<root-readable-token-file>

@@ -1,4 +1,4 @@
-# Bootstrap 0.4.1 배포와 실패 작업 확인
+# Bootstrap 0.4.2 배포와 실패 작업 확인
 
 이 절차는 사용자가 중앙 Broker와 대상 Canary VM에서 직접 수행한다.
 실제 Cloud/VM 검증은 아직 완료되지 않았다. 자동 테스트를 작성하거나 실행하지 않는다.
@@ -21,6 +21,19 @@ Bootstrap 설치 성공을 뜻하지 않는다.
 job/VM/server URL을 포함한 JWT를 수용하고, 단일 행과 JWT 문자 형식은 검사한다.
 JWT 서명, 만료, job/VM 일치 여부는 계속 Broker가 검증한다.
 
+## k3s installer checksum 불일치
+
+`bootstrap.tar.gz: OK` 다음 `install-k3s.sh: FAILED`가 표시되면 외부 k3s
+installer 다운로드 내용이 bundle에 고정된 checksum과 달라 실행 전에 중단된 것이다.
+이 로그는 Node Agent 이미지 digest 오류를 뜻하지 않는다.
+기존 k3s가 있어도 요청 버전이 다르거나 접속 IP의 TLS SAN이 없으면 installer를
+다시 실행하므로 UPDATE에서도 이 단계에 진입할 수 있다.
+
+0.4.2는 내용이 바뀔 수 있는 `get.k3s.io` 대신 공식 저장소의 커밋 고정 URL과
+확인한 SHA-256을 함께 사용한다. 출처와 검증값은
+[installer pin](../deploy/bootstrap/README.md#k3s-installer-pin-갱신)에 기록한다.
+checksum 검사는 유지하며, 선택한 k3s 버전과 Agent digest를 임의로 바꾸지 않는다.
+
 ## 중앙 Broker 배포
 
 최신 수정 코드와 기존 `.env`, CA가 준비된 저장소 루트에서 Bash로 실행한다.
@@ -30,13 +43,13 @@ JWT 서명, 만료, job/VM 일치 여부는 계속 Broker가 검증한다.
 docker compose -f compose.yaml -f compose.agent-enrollment.yaml up -d --build app frontend
 docker compose -f compose.yaml -f compose.agent-enrollment.yaml ps -a
 docker compose -f compose.yaml -f compose.agent-enrollment.yaml exec -T app \
-  ls -l /srv/broker/bootstrap-artifacts/msg-broker-node-agent-bootstrap-0.4.1.tar.gz
+  ls -l /srv/broker/bootstrap-artifacts/msg-broker-node-agent-bootstrap-0.4.2.tar.gz
 ```
 
-기대 결과: app/frontend healthy, migrate 정상 종료, 0.4.1 bundle 존재.
+기대 결과: app/frontend healthy, migrate 정상 종료, 0.4.2 bundle 존재.
 이번 수정에는 추가 DB migration, IAM 변경, Nginx 경로 변경이 없다.
 Node Agent는 0.2.1 그대로이므로 이미 push한 multi-platform index digest를 재사용한다.
-기존 0.4.0 bundle URL에 새 내용을 덮어쓰지 않는다.
+기존 0.4.0/0.4.1 bundle URL에 새 내용을 덮어쓰지 않는다.
 
 ## 기존 RUNNING 작업
 
@@ -62,7 +75,9 @@ docker compose -f compose.yaml -f compose.agent-enrollment.yaml up -d --build ap
 기존 작업이 다음 처리 차례에서 FAILED로 바뀌고 `completed_at`이 기록되는지
 Admin에서 확인한다. 제한시간을 이미 넘겼다면 `BOOTSTRAP_JOB_TIMEOUT`으로
 종료될 수 있다. 이는 예상 가능한 실패 작업 종료이며 VM 재설치가 아니다.
-Node Agent 이미지, Bootstrap bundle 0.4.1, DB schema는 이 복구 수정으로 바뀌지 않는다.
+이 정책 부재 복구 로직 자체는 Node Agent 이미지, Bootstrap bundle, DB schema를
+변경하지 않는다. installer checksum 수정까지 적용하려면 위 app/frontend 재빌드와
+새 0.4.2 작업이 필요하다.
 
 중앙 Broker에서 새 진단 로그를 확인한다.
 
@@ -86,7 +101,7 @@ RUNNING이 계속되면 위 진단 로그를 전달해 해당 단계의 오류�
 DB 상태를 강제로 덮어쓰거나 활성 Cloud 정책을 남긴 채 새 작업을 만들지 않는다.
 현재 API는 동일 VM에 활성 작업이 있으면 새 작업을 409로 거절한다.
 
-정책/보고서가 모두 없는 기존 작업의 종료를 확인한 뒤 새 0.4.1 UPDATE를 생성한다.
+정책/보고서가 모두 없는 기존 작업의 종료를 확인한 뒤 새 0.4.2 UPDATE를 생성한다.
 새 정책이 존재하고 보고서가 아직 없을 때는 RUNNING을 유지해야 하며, 새 작업의
 완료 marker, kubeconfig 업로드와 SUCCEEDED까지 아래 절차로 확인한다.
 
@@ -96,7 +111,7 @@ DB 상태를 강제로 덮어쓰거나 활성 Cloud 정책을 남긴 채 새 작
 다음 값을 사용한다.
 
 - action: UPDATE
-- Bootstrap version: 0.4.1
+- Bootstrap version: 0.4.2
 - k3s version: 기존에 선택한 버전
 - Agent image: `<REGISTRY_USER>/msg-broker-node-agent@sha256:<INDEX_DIGEST>`
 
@@ -112,6 +127,7 @@ sudo journalctl -u google-osconfig-agent --since '30 minutes ago' -n 100 --no-pa
 ```
 
 기대 결과: 새 digest의 Pod가 Ready, 새 job 완료 marker 존재,
+installer 재실행 시 `Verified the pinned k3s installer SHA-256.`,
 `The Broker stored the k3s administrator kubeconfig.`와 `BOOTSTRAP_STATUS=ready`,
 Admin 작업 SUCCEEDED 및 최신 Agent 관측. 오류 로그를 공유할 때 비밀값은 제외한다.
 RUNNING Pod만으로 업로드나 작업 완료를 판정하지 않는다.

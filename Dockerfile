@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /srv/broker
 
-ARG BOOTSTRAP_VERSION=0.4.1
+ARG BOOTSTRAP_VERSION=0.4.2
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends bash coreutils openssl tar \

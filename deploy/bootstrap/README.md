@@ -254,7 +254,7 @@ sudo bash deploy/bootstrap/node-agent-bootstrap.sh remove
 Provider 관리면에 전달할 버전 고정 bundle과 checksum을 만든다.
 
 ```bash
-bash deploy/bootstrap/build-bundle.sh 0.4.1
+bash deploy/bootstrap/build-bundle.sh 0.4.2
 ```
 
 생성되는 `dist/*.tar.gz`와 `.sha256`은 artifact 저장소에 올린다. AWS SSM, GCP
@@ -263,13 +263,24 @@ OS Policy, Azure Managed Run Command가 checksum 검증 후 같은 bundle을 실
 
 ## k3s installer pin 갱신
 
-Bootstrap은 `get.k3s.io`에서 받은 installer를 root로 실행하기 전에
-`MSG_BROKER_K3S_INSTALL_SHA256`과 대조한다. 기본 URL과 digest는
-`node-agent-bootstrap.sh`에 함께 고정되어 있으므로 upstream installer가 바뀌면
-설치는 fail-closed로 중단된다.
+Bootstrap 0.4.2는 공식 `k3s-io/k3s` 저장소의 특정 커밋에 있는 installer를
+다운로드하고 root로 실행하기 전에 `MSG_BROKER_K3S_INSTALL_SHA256`과 대조한다.
+내용이 갱신될 수 있는 `get.k3s.io` 주소는 기본값으로 사용하지 않는다.
+
+- 출처: [공식 설치 스크립트](https://github.com/k3s-io/k3s/blob/2977c525a2e7a487886107ce4df43630ae9b03b2/install.sh)
+- 커밋: `2977c525a2e7a487886107ce4df43630ae9b03b2` (2026-09-03)
+- 다운로드: `https://raw.githubusercontent.com/k3s-io/k3s/2977c525a2e7a487886107ce4df43630ae9b03b2/install.sh`
+- SHA-256: `e5cc3b3d9dfc1662c2d9be6da5abc9a4cd317d6abc3a5ffc02e3dd3248207fee`
+- 확인한 파일 크기: 38693 bytes
+
+이는 installer의 버전 고정이며 설치할 k3s binary 버전은 여전히 Admin에서 선택한
+`k3s_version`을 `INSTALL_K3S_VERSION`으로 전달한다. installer는 해당 릴리스의
+아키텍처별 checksum으로 binary를 검증한다. VM은 이 GitHub raw 주소와 k3s
+릴리스 다운로드 주소에 HTTPS로 접근할 수 있어야 한다.
 
 installer 내용을 의도적으로 갱신할 때는 신뢰할 수 있는 환경에서 새 파일의
-SHA-256을 별도로 확인한 뒤 digest를 함께 갱신한다. mirror URL을 사용하더라도
+SHA-256을 별도로 확인한 뒤 고정 커밋 URL과 digest를 함께 갱신하고 Bootstrap의
+새 버전으로 배포한다. mirror URL을 사용하더라도
 고정 digest와 동일한 installer만 실행되며, 내용이 다르면 설치가 중단된다.
 
 ## Broker 저장과 Runtime pull
