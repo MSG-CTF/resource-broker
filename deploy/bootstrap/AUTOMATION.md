@@ -16,7 +16,7 @@ Content-Type: application/json
 ```json
 {
   "action": "INSTALL",
-  "bootstrap_version": "0.4.0",
+  "bootstrap_version": "0.4.1",
   "k3s_version": "v1.33.3+k3s1",
   "agent_image": "repository/agent@sha256:<64-hex-digest>"
 }
@@ -117,7 +117,23 @@ ready Azure Linux Agent and outbound HTTPS connectivity.
 
 ## Artifact versions
 
-The Docker image builds Bootstrap `0.4.0` by default. Set the Docker build arg
+The Docker image builds Bootstrap `0.4.1` by default. Set the Docker build arg
 `BOOTSTRAP_VERSION` to publish another immutable bundle. The UI/API version must
 match an artifact present in `BOOTSTRAP_ARTIFACT_DIR`; otherwise job creation
 fails before any provider-side change.
+
+Bootstrap `0.4.1` re-executes the runner with `/bin/bash` when a Provider starts
+it with `/bin/sh`, before using Bash options or conditionals. GCP's `SHELL`
+interpreter does not honor the runner's Bash shebang. The bundle also accepts
+upload JWTs up to 4096 characters; the previous 512-character limit could reject
+the Broker's own job-scoped JWT. Upload signature and claim validation remain on
+the Broker.
+
+The Node Agent stays at `0.2.1`; an existing Agent image digest can be reused.
+Do not republish the modified bundle as `0.4.0`: artifact URLs are immutable and
+existing jobs pin their checksums. Older runner rendering stays unchanged, but
+serving an old job still requires its original bundle and configuration. Use a
+new `0.4.1` job after the earlier job reaches a terminal state.
+
+See [Bootstrap recovery](../../docs/BOOTSTRAP_RECOVERY.md) for rollout and manual
+checks when a VM reports `[[: not found` while the Broker still shows `RUNNING`.

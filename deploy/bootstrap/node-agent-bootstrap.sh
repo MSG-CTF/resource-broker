@@ -482,8 +482,9 @@ upload_k3s_credential() {
     < "${K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}")"
   if [[ "$(awk 'END { print NR }' \
       "${K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}")" != "1" \
-      || ! "${delivery_token}" =~ ^[A-Za-z0-9._~+=-]{32,512}$ ]]; then
-    fail "The Broker credential upload token must be one 32 to 512 character base64url-like line."
+      || ${#delivery_token} -lt 32 || ${#delivery_token} -gt 4096 \
+      || ! "${delivery_token}" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
+    fail "The Broker credential upload token must be one JWT line of 32 to 4096 characters."
   fi
   cat > "${WORK_DIR}/broker-curl.conf" <<EOF
 request = "POST"

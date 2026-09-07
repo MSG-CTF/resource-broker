@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+import logging
 import os
 from uuid import UUID, uuid4
 
@@ -39,6 +40,8 @@ from app.services.bootstrap_artifacts import (
 )
 from app.services.k3s_credential_service import bootstrap_upload_for_job
 
+
+LOGGER = logging.getLogger(__name__)
 
 _GCP_LABEL_KEY = "msg-broker-bootstrap-job"
 _AWS_OPT_IN_TAG_KEY = "msg-broker-bootstrap"
@@ -476,6 +479,7 @@ class BootstrapJobService:
                 error.public_message,
             )
             return
+        stage = "apply"
         try:
             if job.status is BootstrapJobStatus.APPLYING:
                 adapter.ensure_temporary_label(
@@ -498,6 +502,7 @@ class BootstrapJobService:
 
             now = datetime.now(UTC)
             if now >= job.deadline_at:
+                stage = "cleanup_after_timeout"
                 self._cleanup_gcp(adapter, job)
                 self._complete(
                     job,
@@ -506,6 +511,7 @@ class BootstrapJobService:
                     "The bootstrap job did not finish before its deadline.",
                 )
                 return
+            stage = "read_report"
             compliance = adapter.compliance(
                 job.provider_job_id or _assignment_id(job.job_id)
             )
@@ -513,6 +519,7 @@ class BootstrapJobService:
                 job.updated_at = now
                 self._session.commit()
                 return
+            stage = "cleanup_after_report"
             self._cleanup_gcp(adapter, job)
             if compliance:
                 self._complete(job, BootstrapJobStatus.SUCCEEDED, None, None)
@@ -524,6 +531,15 @@ class BootstrapJobService:
                     "GCP reported that the bootstrap policy was not compliant.",
                 )
         except GcpAdapterError as error:
+            # Never log the SDK message/traceback: it can contain credentials.
+            cause = error.__cause__
+            LOGGER.warning(
+                "GCP bootstrap job=%s stage=%s code=%s cause_type=%s",
+                job.job_id,
+                stage,
+                error.error_code,
+                type(cause).__name__ if cause is not None else type(error).__name__,
+            )
             self._handle_gcp_error(adapter, job, error)
         except Exception:
             try:

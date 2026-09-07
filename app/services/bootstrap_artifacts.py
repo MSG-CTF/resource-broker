@@ -138,8 +138,17 @@ def render_runner_script(
     assignments = "\n".join(
         f"{name}={shlex.quote(value)}" for name, value in values.items()
     )
+    # Keep older job renderings byte-for-byte stable for their stored checksums.
+    # OS Config's SHELL interpreter invokes /bin/sh regardless of the shebang.
+    bash_preamble = ""
+    if tuple(int(part) for part in bootstrap_version.split(".")) >= (0, 4, 1):
+        bash_preamble = (
+            'if [ -z "${BASH_VERSION:-}" ]; then\n'
+            '  exec /bin/bash "$0" "$@"\n'
+            'fi\n'
+        )
     return f"""#!/usr/bin/env bash
-set -euo pipefail
+{bash_preamble}set -euo pipefail
 {assignments}
 MARKER_DIR=/var/lib/msg-broker-bootstrap/jobs
 WORK_DIR="$(mktemp -d)"
