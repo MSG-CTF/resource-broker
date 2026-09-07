@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.domain.enums import RuntimeType
+from app.domain.observation import OBSERVATION_CLOCK_SKEW
 from app.repositories.runtime_observations import (
     RuntimeContainerSnapshot,
     RuntimeObservationRepository,
@@ -20,6 +21,10 @@ class RetiredResourceTargetError(ValueError):
 
 
 class StaleAgentObservationError(ValueError):
+    pass
+
+
+class FutureAgentObservationError(ValueError):
     pass
 
 
@@ -88,6 +93,9 @@ class AgentObservationService:
             raise ResourceTargetNotFoundError
         if resource.retired_at is not None:
             raise RetiredResourceTargetError
+        accepted_at = datetime.now(UTC)
+        if observed_at > accepted_at + OBSERVATION_CLOCK_SKEW:
+            raise FutureAgentObservationError
         current_runtime_observed_at = resource.runtime_observed_at
         if (
             current_runtime_observed_at is not None
@@ -146,7 +154,6 @@ class AgentObservationService:
                 request_based_available.ephemeral_storage_mib
             ),
         )
-        accepted_at = datetime.now(UTC)
         result = self._observations.apply_snapshot(
             resource=resource,
             observed_at=observed_at,

@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     UniqueConstraint,
     func,
@@ -29,6 +30,7 @@ from app.domain.enums import (
     PermissionStatus,
     Provider,
     ProviderApiStatus,
+    ReleaseReason,
     ReservationStatus,
     RuntimeType,
 )
@@ -374,6 +376,13 @@ class ResourceTargetTable(Base):
         passive_deletes=True,
     )
 
+    k3s_credential: Mapped[K3sCredentialTable | None] = relationship(
+        back_populates="resource_target",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+
     reservations: Mapped[list[ReservationTable]] = relationship(
         back_populates="resource_target",
         cascade="all, delete-orphan",
@@ -400,6 +409,24 @@ class ReservationTable(Base):
             "ephemeral_storage_mib > 0",
             name="ephemeral_storage_positive",
         ),
+        CheckConstraint(
+            (
+                "deployed_cpu_millicores IS NULL "
+                "OR deployed_cpu_millicores > 0"
+            ),
+            name="deployed_cpu_positive",
+        ),
+        CheckConstraint(
+            "deployed_memory_mib IS NULL OR deployed_memory_mib > 0",
+            name="deployed_memory_positive",
+        ),
+        CheckConstraint(
+            (
+                "deployed_ephemeral_storage_mib IS NULL "
+                "OR deployed_ephemeral_storage_mib > 0"
+            ),
+            name="deployed_ephemeral_storage_positive",
+        ),
         Index(
             "ix_reservations_target_status",
             "resource_target_id",
@@ -424,10 +451,14 @@ class ReservationTable(Base):
         default=uuid4,
     )
     idempotency_key: Mapped[str] = mapped_column(
-        String(128),
+        String(255),
         nullable=False,
     )
     request_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
     resource_target_id: Mapped[UUID] = mapped_column(
         PostgreSqlUuid(as_uuid=True),
         ForeignKey(
@@ -469,8 +500,44 @@ class ReservationTable(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    commit_request_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    commit_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    runtime_workload_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    deployed_cpu_millicores: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    deployed_memory_mib: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    deployed_ephemeral_storage_mib: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
     released_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
+        nullable=True,
+    )
+    release_request_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    release_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    release_reason: Mapped[ReleaseReason | None] = mapped_column(
+        _enum_type(ReleaseReason, "reservation_release_reason"),
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -593,6 +660,86 @@ class BootstrapJobTable(Base):
 
     resource_target: Mapped[ResourceTargetTable] = relationship(
         back_populates="bootstrap_jobs",
+    )
+
+    k3s_credential: Mapped[K3sCredentialTable | None] = relationship(
+        back_populates="source_job",
+        uselist=False,
+    )
+
+
+class K3sCredentialTable(Base):
+    __tablename__ = "k3s_credentials"
+    __table_args__ = (
+        CheckConstraint(
+            "kubeconfig_sha256 ~ '^[0-9a-f]{64}$'",
+            name="kubeconfig_sha256_format",
+        ),
+        CheckConstraint(
+            "client_certificate_fingerprint_sha256 ~ '^[0-9a-f]{64}$'",
+            name="client_certificate_fingerprint_sha256_format",
+        ),
+        Index("ix_k3s_credentials_uploaded_at", "uploaded_at"),
+    )
+
+    resource_target_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey(
+            "resource_targets.resource_target_id",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    source_job_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey("bootstrap_jobs.job_id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    encrypted_kubeconfig: Mapped[bytes] = mapped_column(
+        LargeBinary,
+        nullable=False,
+    )
+    kubeconfig_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    encryption_scheme: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="fernet-v1",
+        server_default="fernet-v1",
+    )
+    server_url: Mapped[str] = mapped_column(String(128), nullable=False)
+    client_certificate_fingerprint_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    client_certificate_not_after: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    resource_target: Mapped[ResourceTargetTable] = relationship(
+        back_populates="k3s_credential",
+    )
+    source_job: Mapped[BootstrapJobTable] = relationship(
+        back_populates="k3s_credential",
     )
 
 

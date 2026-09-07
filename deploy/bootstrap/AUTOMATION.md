@@ -29,7 +29,23 @@ job per resource target. The execution deadline starts when a queued job enters
 
 Every provider runs the same immutable Bootstrap bundle and job-specific runner.
 Both files are downloaded over HTTPS and checked against SHA-256 values stored
-when the job is created.
+when the job is created. The bundle then verifies the separately downloaded k3s
+installer against the SHA-256 pinned in that Bootstrap version before executing
+it as root.
+
+For `INSTALL` and `UPDATE`, the Provider runner uploads the k3s administrator
+kubeconfig to the Broker over HTTPS. Job creation fails before any provider-side
+mutation unless the Broker has separate upload-token and at-rest encryption
+secrets plus a Runtime-reachable public or private VM IP. The runner rewrites only
+its temporary kubeconfig copy to `https://<address>:6443` and requires a `200` or
+`201` Broker response before Bootstrap reports ready.
+
+The upload bearer is an HS256 JWT scoped to one bootstrap job, resource target,
+and k3s server URL. It expires after 24 hours. The Broker validates the embedded
+administrator certificate and stores one Fernet-encrypted current kubeconfig per
+resource target. Runtime authenticates to separate pull endpoints with a
+short-lived HS256 service JWT and receives credentials in pages of at most 200.
+Neither plaintext kubeconfig nor either JWT secret is stored in job output.
 
 GCP, AWS, and Azure jobs accept inventory targets normalized as `AMD64` or
 `ARM64`.

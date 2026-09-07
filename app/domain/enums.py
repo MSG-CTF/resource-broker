@@ -43,6 +43,12 @@ class ReservationStatus(StrEnum):
     EXPIRED = "EXPIRED"
 
 
+class ReleaseReason(StrEnum):
+    RUNTIME_CREATE_FAILED = "RUNTIME_CREATE_FAILED"
+    DEPLOYED_SPEC_MISMATCH = "DEPLOYED_SPEC_MISMATCH"
+    SCHEDULER_CANCELLED = "SCHEDULER_CANCELLED"
+
+
 class CredentialStatus(StrEnum):
     VALID = "VALID"
     INVALID = "INVALID"

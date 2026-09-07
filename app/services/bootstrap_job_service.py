@@ -37,6 +37,7 @@ from app.services.bootstrap_artifacts import (
     runner_public_url,
     runner_sha256,
 )
+from app.services.k3s_credential_service import bootstrap_upload_for_job
 
 
 _GCP_LABEL_KEY = "msg-broker-bootstrap-job"
@@ -128,8 +129,21 @@ def _label_value(job_id: UUID) -> str:
     return f"job-{job_id.hex[:20]}"
 
 
-def _runner(job: BootstrapJobTable) -> str:
+def _runner(
+    job: BootstrapJobTable,
+    resource_target: ResourceTargetTable | None = None,
+) -> str:
     artifact = artifact_for_version(job.bootstrap_version)
+    k3s_credential_upload = None
+    if job.action in {BootstrapAction.INSTALL, BootstrapAction.UPDATE}:
+        target = resource_target or job.resource_target
+        k3s_credential_upload = bootstrap_upload_for_job(
+            job_id=job.job_id,
+            resource_target_id=job.resource_target_id,
+            created_at=job.created_at,
+            public_ip=target.public_ip,
+            private_ip=target.private_ip,
+        )
     return render_runner_script(
         job_id=job.job_id,
         resource_target_id=job.resource_target_id,
@@ -142,6 +156,22 @@ def _runner(job: BootstrapJobTable) -> str:
         enrollment_audience_value=job.enrollment_audience,
         k3s_version=job.k3s_version,
         agent_image=job.agent_image,
+        k3s_credential_upload_url=(
+            k3s_credential_upload.upload_url
+            if k3s_credential_upload
+            else ""
+        ),
+        k3s_server_url=(
+            k3s_credential_upload.k3s_server_url
+            if k3s_credential_upload
+            else ""
+        ),
+        k3s_credential_upload_token=(
+            k3s_credential_upload.upload_token
+            if k3s_credential_upload
+            else ""
+        ),
+        k3s_credential_upload_required=k3s_credential_upload is not None,
     )
 
 
@@ -246,7 +276,7 @@ class BootstrapJobService:
             created_at=now,
             updated_at=now,
         )
-        job.runner_sha256 = runner_sha256(_runner(job))
+        job.runner_sha256 = runner_sha256(_runner(job, target))
         try:
             self._jobs.add(job)
             self._session.commit()

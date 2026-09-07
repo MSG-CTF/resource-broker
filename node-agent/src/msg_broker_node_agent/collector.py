@@ -470,6 +470,9 @@ class KubernetesCollector:
             return {}
 
     def collect(self) -> dict[str, Any]:
+        # A commit during collection must not make an earlier Pod list look
+        # like a post-commit snapshot, so timestamp before starting the reads.
+        observed_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         try:
             node = self._core_api.read_node(self._node_name)
             pod_list = self._core_api.list_pod_for_all_namespaces(
@@ -490,7 +493,6 @@ class KubernetesCollector:
 
         pods = list(getattr(pod_list, "items", None) or [])
         summary = self._read_summary()
-        observed_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         return {
             "resource_target_id": self._resource_target_id(node),
             "observed_at": observed_at,

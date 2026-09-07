@@ -239,11 +239,12 @@ function UsageSummary({ usage }) {
 const CANDIDATE_REASON_LABELS = {
   PROVIDER_ACCOUNT_DISABLED: "Provider 계정이 사용 중지됨",
   RESOURCE_TARGET_RETIRED: "동기화 대상에서 제외된 VM",
+  PROVIDER_INSTANCE_NOT_RUNNING: "Cloud 동기화에서 실행 중인 VM으로 확인되지 않음",
   RUNTIME_NOT_READY: "Runtime 준비 안 됨",
   ARCHITECTURE_NOT_OBSERVED: "아키텍처 미수집",
   RUNTIME_TARGET_NOT_OBSERVED: "Runtime target 미수집",
   RUNTIME_OBSERVATION_MISSING: "Agent 관측 없음",
-  RUNTIME_OBSERVATION_STALE: "Agent heartbeat 만료",
+  RUNTIME_OBSERVATION_STALE: "Agent 관측 만료 또는 시각 오류",
   PROVIDER_CAPACITY_NOT_OBSERVED: "Provider CPU·메모리 미수집",
   RUNTIME_USAGE_NOT_OBSERVED: "VM 실제 사용량 미수집",
   ALLOCATABLE_CAPACITY_NOT_OBSERVED: "배치 가능량 미수집",
@@ -255,6 +256,9 @@ function candidateRegistrationReasons(resource) {
     reasons.push("PROVIDER_ACCOUNT_DISABLED");
   }
   if (resource.retired_at) reasons.push("RESOURCE_TARGET_RETIRED");
+  if (resource.status !== "RUNNING") {
+    reasons.push("PROVIDER_INSTANCE_NOT_RUNNING");
+  }
   if (!resource.runtime?.ready) reasons.push("RUNTIME_NOT_READY");
   if (!resource.architecture) reasons.push("ARCHITECTURE_NOT_OBSERVED");
   if (!resource.runtime?.type || !resource.runtime?.target_id) {
@@ -265,10 +269,15 @@ function candidateRegistrationReasons(resource) {
   if (!resource.runtime?.observed_at || !lastSeenAt) {
     reasons.push("RUNTIME_OBSERVATION_MISSING");
   } else {
-    const observedAt = Date.parse(lastSeenAt);
+    const receivedAt = Date.parse(lastSeenAt);
+    const observedAt = Date.parse(resource.runtime.observed_at);
+    const now = Date.now();
     if (
+      Number.isNaN(receivedAt) ||
       Number.isNaN(observedAt) ||
-      Date.now() - observedAt >= CANDIDATE_OBSERVATION_STALE_MS
+      now - receivedAt >= CANDIDATE_OBSERVATION_STALE_MS ||
+      now - observedAt >= CANDIDATE_OBSERVATION_STALE_MS ||
+      observedAt > now + 30_000
     ) {
       reasons.push("RUNTIME_OBSERVATION_STALE");
     }

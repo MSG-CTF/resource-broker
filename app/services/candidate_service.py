@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.tables import ResourceTargetTable
 from app.domain.enums import Architecture, CandidateQueryStatus
+from app.domain.observation import OBSERVATION_CLOCK_SKEW
 from app.repositories.reservations import (
     CandidateRepository,
     ReservedCapacity,
@@ -56,6 +57,7 @@ class CandidateService:
         resources = self._candidates.list_eligible_resources(
             architecture=architecture,
             observed_after=observed_after,
+            observed_before=now + OBSERVATION_CLOCK_SKEW,
         )
         usage_by_target = self._candidates.deductible_usage_by_target(
             resource_target_ids=tuple(
@@ -95,7 +97,8 @@ class CandidateService:
                 continue
 
             runtime_last_seen_at = resource.runtime_last_seen_at
-            if runtime_last_seen_at is None:
+            runtime_observed_at = resource.runtime_observed_at
+            if runtime_last_seen_at is None or runtime_observed_at is None:
                 continue
             valid_until = min(
                 now
@@ -103,6 +106,10 @@ class CandidateService:
                     seconds=self._settings.candidate_validity_seconds
                 ),
                 runtime_last_seen_at
+                + timedelta(
+                    seconds=self._settings.observation_stale_seconds
+                ),
+                runtime_observed_at
                 + timedelta(
                     seconds=self._settings.observation_stale_seconds
                 ),

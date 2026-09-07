@@ -17,10 +17,16 @@ from app.api.admin_resource_targets import router as admin_resource_targets_rout
 from app.api.agent_enrollments import router as agent_enrollments_router
 from app.api.agent_bootstrap import router as agent_bootstrap_router
 from app.api.agent_bootstrap_enrollments import router as agent_bootstrap_enrollments_router
+from app.api.agent_k3s_credentials import router as agent_k3s_credentials_router
 from app.api.agent_observations import router as agent_observations_router
 from app.api.candidates import router as candidates_router
 from app.api.health import router as health_router
 from app.api.reservations import router as reservations_router
+from app.api.runtime_auth import (
+    RuntimeAuthHttpError,
+    runtime_auth_http_error_handler,
+)
+from app.api.runtime_k3s_credentials import router as runtime_k3s_credentials_router
 from app.api.scheduler_auth import (
     SchedulerAuthHttpError,
     scheduler_auth_http_error_handler,
@@ -57,6 +63,10 @@ def create_app() -> FastAPI:
         SchedulerAuthHttpError,
         scheduler_auth_http_error_handler,
     )
+    app.add_exception_handler(
+        RuntimeAuthHttpError,
+        runtime_auth_http_error_handler,
+    )
     app.include_router(admin_auth_router)
     app.include_router(admin_agent_enrollments_router)
     app.include_router(admin_bootstrap_jobs_router)
@@ -65,9 +75,11 @@ def create_app() -> FastAPI:
     app.include_router(agent_enrollments_router)
     app.include_router(agent_bootstrap_router)
     app.include_router(agent_bootstrap_enrollments_router)
+    app.include_router(agent_k3s_credentials_router)
     app.include_router(agent_observations_router)
     app.include_router(candidates_router)
     app.include_router(reservations_router)
+    app.include_router(runtime_k3s_credentials_router)
     app.include_router(health_router)
 
     @app.get(

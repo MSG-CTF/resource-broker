@@ -67,7 +67,13 @@ class AgentContainerObservation(ApiSchema):
 
 class AgentObservationRequest(ApiSchema):
     resource_target_id: UUID
-    observed_at: datetime
+    observed_at: datetime = Field(
+        description=(
+            "Start of Node/Pod/usage collection, before any reads. "
+            "Must include a timezone and be no more than 30 seconds "
+            "ahead of the Broker clock."
+        ),
+    )
     snapshot_complete: bool
     runtime: AgentRuntimeObservation
     node_allocatable: AgentCapacity

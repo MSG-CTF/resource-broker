@@ -17,6 +17,7 @@ from app.schemas.agent_observation import (
 from app.schemas.provider_account import ErrorResponse
 from app.services.agent_observation_service import (
     AgentObservationService,
+    FutureAgentObservationError,
     ObservationCapacity,
     ObservationUsage,
     ResourceTargetNotFoundError,
@@ -166,6 +167,12 @@ def record_agent_observation(
             status.HTTP_409_CONFLICT,
             "STALE_AGENT_OBSERVATION",
             "The observation is older than the current runtime snapshot.",
+        )
+    except FutureAgentObservationError:
+        return _error_response(
+            status.HTTP_409_CONFLICT,
+            "FUTURE_AGENT_OBSERVATION",
+            "The observation is more than 30 seconds ahead of the Broker clock.",
         )
     except SQLAlchemyError:
         session.rollback()

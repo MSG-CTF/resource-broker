@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.db.tables import ResourceTargetTable, RuntimeContainerTable
 from app.domain.enums import Provider
+from app.domain.observation import OBSERVATION_CLOCK_SKEW
+from app.domain.provider_state import RUNNING_PROVIDER_INSTANCE_STATE
 from app.repositories.provider_accounts import ResourceTargetRepository
 from app.services.scheduler_settings import SchedulerSettings
 
@@ -113,6 +115,11 @@ class ResourceTargetService:
                 "RESOURCE_TARGET_RETIRED",
                 "The resource target is retired.",
             )
+        if resource.provider_instance_state != RUNNING_PROVIDER_INSTANCE_STATE:
+            raise self._registration_error(
+                "PROVIDER_INSTANCE_NOT_RUNNING",
+                "The latest Provider snapshot does not confirm a running VM.",
+            )
         if not resource.ready:
             raise self._registration_error(
                 "RUNTIME_NOT_READY",
@@ -130,22 +137,29 @@ class ResourceTargetService:
             )
 
         last_seen_at = resource.runtime_last_seen_at
-        if resource.runtime_observed_at is None or last_seen_at is None:
+        observed_at = resource.runtime_observed_at
+        if observed_at is None or last_seen_at is None:
             raise self._registration_error(
                 "RUNTIME_OBSERVATION_MISSING",
                 "A Runtime observation has not been received.",
             )
         if last_seen_at.tzinfo is None:
             last_seen_at = last_seen_at.replace(tzinfo=UTC)
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=UTC)
         stale_seconds = (
             SchedulerSettings.from_environment().observation_stale_seconds
         )
-        if last_seen_at <= datetime.now(UTC) - timedelta(
-            seconds=stale_seconds
+        now = datetime.now(UTC)
+        observed_after = now - timedelta(seconds=stale_seconds)
+        if (
+            last_seen_at <= observed_after
+            or observed_at <= observed_after
+            or observed_at > now + OBSERVATION_CLOCK_SKEW
         ):
             raise self._registration_error(
                 "RUNTIME_OBSERVATION_STALE",
-                "The latest Runtime observation is stale.",
+                "The latest Runtime observation is stale or has an invalid timestamp.",
             )
 
         if (

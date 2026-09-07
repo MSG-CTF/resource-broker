@@ -23,6 +23,14 @@ Agent는 원본 관측값만 전송한다. 중앙 Broker는 CPU와 memory에 대
 Broker reservation을 추가로 차감한다. Ephemeral storage는 node allocatable과
 workload requests 기준 계산을 유지한다.
 
+`0.2.1`부터 `observed_at`은 Node/Pod/usage 조회를 시작하기 직전의 시각이다.
+수집 중에 확정된 예약이 수집 전 Pod 목록에 반영된 것으로 오인되지 않도록
+수집 종료 시각을 사용하지 않는다. Broker는 수신 시각과 별도로 관측 시각의
+신선도를 검사하고, `committed_at + 30초`보다 늦게 시작한 관측부터 확정 예약의
+추가 차감을 중단한다. Broker와 대상 VM은 시계 오차를 30초 이내로 유지한다.
+Broker보다 30초를 초과해 미래인 요청은 `409 FUTURE_AGENT_OBSERVATION`이다.
+예약 정합성 수정은 Backend와 Agent `0.2.1`을 함께 배포해야 적용된다.
+
 Agent observation 요청에는 다음 필드가 포함된다.
 
 ```json
@@ -56,12 +64,12 @@ ARM64 이미지를 하나의 multi-platform image index로 배포한다.
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  --tag <DOCKERHUB_USER>/msg-broker-node-agent:0.2.0 \
+  --tag <DOCKERHUB_USER>/msg-broker-node-agent:0.2.1 \
   --push \
   ./node-agent
 
 docker buildx imagetools inspect \
-  <DOCKERHUB_USER>/msg-broker-node-agent:0.2.0
+  <DOCKERHUB_USER>/msg-broker-node-agent:0.2.1
 ```
 
 운영 Bootstrap에는 tag가 아니라 registry가 반환한 `sha256` digest를 전달한다.

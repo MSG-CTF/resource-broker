@@ -87,7 +87,21 @@ def render_runner_script(
     enrollment_audience_value: str,
     k3s_version: str | None,
     agent_image: str | None,
+    k3s_credential_upload_url: str = "",
+    k3s_server_url: str = "",
+    k3s_credential_upload_token: str = "",
+    k3s_credential_upload_required: bool = False,
 ) -> str:
+    if k3s_credential_upload_required and not all(
+        (
+            k3s_credential_upload_url,
+            k3s_server_url,
+            k3s_credential_upload_token,
+        )
+    ):
+        raise BootstrapConfigurationError(
+            "Required Broker k3s credential upload settings are incomplete."
+        )
     enrollment_mode = {
         Provider.GCP: "gcp-identity",
         Provider.AWS: "aws-instance-identity",
@@ -114,6 +128,12 @@ def render_runner_script(
         ),
         "K3S_VERSION": k3s_version or "",
         "AGENT_IMAGE": agent_image or "",
+        "K3S_CREDENTIAL_UPLOAD_URL": k3s_credential_upload_url,
+        "K3S_SERVER_URL": k3s_server_url,
+        "K3S_CREDENTIAL_UPLOAD_TOKEN": k3s_credential_upload_token,
+        "K3S_CREDENTIAL_UPLOAD_REQUIRED": (
+            "true" if k3s_credential_upload_required else "false"
+        ),
     }
     assignments = "\n".join(
         f"{name}={shlex.quote(value)}" for name, value in values.items()
@@ -138,13 +158,25 @@ printf '%s  %s\n' "${{ARTIFACT_SHA256}}" "${{WORK_DIR}}/bootstrap.tar.gz" \
 tar -xzf "${{WORK_DIR}}/bootstrap.tar.gz" -C "${{WORK_DIR}}"
 SCRIPT="${{WORK_DIR}}/msg-broker-node-agent-bootstrap-${{BOOTSTRAP_VERSION}}/deploy/bootstrap/node-agent-bootstrap.sh"
 test -x "${{SCRIPT}}"
+K3S_CREDENTIAL_UPLOAD_TOKEN_FILE=
+if [[ "${{K3S_CREDENTIAL_UPLOAD_REQUIRED}}" == "true" ]]; then
+  K3S_CREDENTIAL_UPLOAD_TOKEN_FILE="${{WORK_DIR}}/k3s-credential-upload-token"
+  printf '%s\n' "${{K3S_CREDENTIAL_UPLOAD_TOKEN}}" \
+    > "${{K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}}"
+  chmod 0600 "${{K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}}"
+fi
 MSG_BROKER_RESOURCE_TARGET_ID="${{RESOURCE_TARGET_ID}}" \
+MSG_BROKER_BOOTSTRAP_JOB_ID="${{JOB_ID}}" \
 MSG_BROKER_K3S_VERSION="${{K3S_VERSION}}" \
 MSG_BROKER_AGENT_IMAGE="${{AGENT_IMAGE}}" \
 MSG_BROKER_ENROLLMENT_MODE={enrollment_mode} \
 MSG_BROKER_ENROLLMENT_URL="${{ENROLLMENT_URL}}" \
 MSG_BROKER_ENROLLMENT_AUDIENCE="${{ENROLLMENT_AUDIENCE}}" \
 MSG_BROKER_AZURE_ATTESTATION_NONCE="${{AZURE_ATTESTATION_NONCE}}" \
+MSG_BROKER_K3S_CREDENTIAL_UPLOAD_REQUIRED="${{K3S_CREDENTIAL_UPLOAD_REQUIRED}}" \
+MSG_BROKER_K3S_CREDENTIAL_UPLOAD_URL="${{K3S_CREDENTIAL_UPLOAD_URL}}" \
+MSG_BROKER_K3S_SERVER_URL="${{K3S_SERVER_URL}}" \
+MSG_BROKER_K3S_CREDENTIAL_UPLOAD_TOKEN_FILE="${{K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}}" \
   bash "${{SCRIPT}}" "${{ACTION}}"
 install -d -o root -g root -m 0700 "${{MARKER_DIR}}"
 printf '%s\n' "${{ACTION}}" > "${{MARKER_DIR}}/${{JOB_ID}}.done"

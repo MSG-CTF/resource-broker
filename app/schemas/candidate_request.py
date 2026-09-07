@@ -31,7 +31,6 @@ class ResourceProfile(RequestSchema):
     cpu_millicores: int = Field(gt=0, strict=True)
     memory_mib: int = Field(gt=0, strict=True)
     ephemeral_storage_mib: int = Field(gt=0, strict=True)
-    architecture: Architecture
 
 
 class CandidateQueryRequest(RequestSchema):
@@ -40,4 +39,5 @@ class CandidateQueryRequest(RequestSchema):
     team_id: UUID
     challenge_id: UUID
     instance_id: NonEmptyString
+    architecture: Architecture
     resource_profile: ResourceProfile

@@ -11,6 +11,8 @@ from app.db.tables import (
     ResourceTargetTable,
 )
 from app.domain.enums import Architecture, ReservationStatus
+from app.domain.observation import OBSERVATION_CLOCK_SKEW
+from app.domain.provider_state import RUNNING_PROVIDER_INSTANCE_STATE
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +31,7 @@ class CandidateRepository:
         *,
         architecture: Architecture,
         observed_after: datetime,
+        observed_before: datetime,
     ) -> tuple[ResourceTargetTable, ...]:
         statement = (
             select(ResourceTargetTable)
@@ -39,12 +42,16 @@ class CandidateRepository:
                 ResourceTargetTable.enabled.is_(True),
                 ResourceTargetTable.ready.is_(True),
                 ResourceTargetTable.retired_at.is_(None),
+                ResourceTargetTable.provider_instance_state
+                == RUNNING_PROVIDER_INSTANCE_STATE,
                 ResourceTargetTable.architecture == architecture,
                 ResourceTargetTable.runtime_type.is_not(None),
                 ResourceTargetTable.target_id.is_not(None),
                 ResourceTargetTable.runtime_last_seen_at.is_not(None),
                 ResourceTargetTable.runtime_last_seen_at > observed_after,
                 ResourceTargetTable.runtime_observed_at.is_not(None),
+                ResourceTargetTable.runtime_observed_at > observed_after,
+                ResourceTargetTable.runtime_observed_at <= observed_before,
                 ResourceTargetTable.provider_capacity_cpu_millicores.is_not(
                     None
                 ),
@@ -199,6 +206,22 @@ class ReservationRepository:
         self._session.flush()
         return result.rowcount or 0
 
+    def expire_held(self, reservation_id: UUID, *, now: datetime) -> bool:
+        # Recheck status in the database after any concurrent writer finishes;
+        # never overwrite COMMITTED using a previously loaded HELD snapshot.
+        statement = (
+            update(ReservationTable)
+            .where(
+                ReservationTable.reservation_id == reservation_id,
+                ReservationTable.status == ReservationStatus.HELD,
+                ReservationTable.expires_at <= now,
+            )
+            .values(status=ReservationStatus.EXPIRED, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        result = self._session.execute(statement)
+        return result.rowcount == 1
+
     def expire_held_for_instance(
         self,
         *,
@@ -256,10 +279,10 @@ def _deductible_reservation_filter(now: datetime):
         and_(
             ReservationTable.status == ReservationStatus.COMMITTED,
             or_(
-                ResourceTargetTable.runtime_last_seen_at.is_(None),
+                ResourceTargetTable.runtime_observed_at.is_(None),
                 ReservationTable.committed_at.is_(None),
-                ReservationTable.committed_at
-                >= ResourceTargetTable.runtime_last_seen_at,
+                ReservationTable.committed_at + OBSERVATION_CLOCK_SKEW
+                >= ResourceTargetTable.runtime_observed_at,
             ),
         ),
     )

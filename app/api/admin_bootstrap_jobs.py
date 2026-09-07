@@ -22,6 +22,10 @@ from app.services.bootstrap_job_service import (
     BootstrapResourceTargetInvalidError,
     BootstrapResourceTargetNotFoundError,
 )
+from app.services.k3s_credential_service import (
+    K3sCredentialConfigurationError,
+    K3sCredentialTargetAddressError,
+)
 
 
 router = APIRouter(
@@ -69,6 +73,7 @@ def _error(status_code: int, code: str, message: str) -> JSONResponse:
         status.HTTP_409_CONFLICT: {"model": ErrorResponse},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
     },
 )
 def create_bootstrap_job(
@@ -96,6 +101,18 @@ def create_bootstrap_job(
         )
     except BootstrapArtifactNotFoundError:
         return _error(422, "BOOTSTRAP_ARTIFACT_NOT_FOUND", "The requested bootstrap artifact is not available.")
+    except K3sCredentialTargetAddressError:
+        return _error(
+            422,
+            "K3S_ADDRESS_UNAVAILABLE",
+            "The resource target does not have the configured k3s API IP address.",
+        )
+    except K3sCredentialConfigurationError:
+        return _error(
+            503,
+            "K3S_CREDENTIAL_STORAGE_NOT_CONFIGURED",
+            "Broker k3s credential storage is not configured correctly.",
+        )
     except BootstrapJobConflictError:
         return _error(409, "BOOTSTRAP_JOB_ALREADY_ACTIVE", "This resource target already has an active bootstrap job.")
     except SQLAlchemyError:

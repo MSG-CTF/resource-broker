@@ -2,8 +2,7 @@
 /.agents/
 /AGENTS.md
 
-# 로컬 테스트를 위한 폴더
-/tests
+# 로컬 보조 스크립트와 과거 설명 자료
 /scripts
 /explain
 /tools/scheduler_smoke.py

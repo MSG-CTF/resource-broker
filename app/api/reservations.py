@@ -8,19 +8,25 @@ from sqlalchemy.orm import Session
 from app.api.scheduler_auth import require_scheduler
 from app.db.session import get_db_session
 from app.db.tables import ReservationTable
+from app.schemas.candidate_request import ResourceProfile
 from app.schemas.provider_account import ErrorResponse
 from app.schemas.reservation import (
     ReservationCapacity,
+    ReservationCommitRequest,
     ReservationCreateRequest,
+    ReservationReleaseRequest,
     ReservationResponse,
 )
 from app.services.reservation_service import (
     ActiveInstanceReservationError,
     CandidateNotFoundError,
     CandidateUnavailableError,
+    DeployedSpecMismatchError,
     InsufficientCandidateCapacityError,
     ReservationConflictError,
     ReservationIdempotencyConflictError,
+    ReservationInstanceMismatchError,
+    ReservationMutationConflictError,
     ReservationNotFoundError,
     ReservationService,
     ReservationStateConflictError,
@@ -39,6 +45,20 @@ def _response(reservation: ReservationTable) -> ReservationResponse:
     target_id = reservation.resource_target.target_id
     if target_id is None:
         raise CandidateUnavailableError
+    deployed_profile = None
+    if (
+        reservation.deployed_cpu_millicores is not None
+        and reservation.deployed_memory_mib is not None
+        and reservation.deployed_ephemeral_storage_mib is not None
+    ):
+        deployed_profile = ResourceProfile(
+            cpu_millicores=reservation.deployed_cpu_millicores,
+            memory_mib=reservation.deployed_memory_mib,
+            ephemeral_storage_mib=(
+                reservation.deployed_ephemeral_storage_mib
+            ),
+        )
+
     return ReservationResponse(
         reservation_id=reservation.reservation_id,
         request_id=reservation.request_id,
@@ -58,6 +78,9 @@ def _response(reservation: ReservationTable) -> ReservationResponse:
         created_at=reservation.created_at,
         committed_at=reservation.committed_at,
         released_at=reservation.released_at,
+        runtime_workload_id=reservation.runtime_workload_id,
+        deployed_resource_profile=deployed_profile,
+        release_reason=reservation.release_reason,
         updated_at=reservation.updated_at,
     )
 
@@ -96,8 +119,8 @@ def create_reservation(
     profile = request.resource_profile
     try:
         outcome = ReservationService(session).create(
-            idempotency_key=request.idempotency_key,
             request_id=request.request_id,
+            requested_at=request.requested_at,
             candidate_id=request.candidate_id,
             team_id=request.team_id,
             challenge_id=request.challenge_id,
@@ -105,7 +128,7 @@ def create_reservation(
             cpu_millicores=profile.cpu_millicores,
             memory_mib=profile.memory_mib,
             ephemeral_storage_mib=profile.ephemeral_storage_mib,
-            architecture=profile.architecture,
+            architecture=request.architecture,
         )
     except CandidateNotFoundError:
         return _error(
@@ -128,8 +151,8 @@ def create_reservation(
     except ReservationIdempotencyConflictError:
         return _error(
             409,
-            "IDEMPOTENCY_KEY_REUSED",
-            "The idempotency key was already used for another request.",
+            "REQUEST_ID_REUSED",
+            "The request ID was already used for another reservation.",
         )
     except ActiveInstanceReservationError:
         return _error(
@@ -209,16 +232,34 @@ def get_reservation(
         status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
         status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
         status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
     },
 )
 def commit_reservation(
     reservation_id: UUID,
+    request: ReservationCommitRequest,
     session: Session = Depends(get_db_session),
 ) -> ReservationResponse | Response:
+    if request.reservation_id != reservation_id:
+        return _error(
+            409,
+            "RESERVATION_ID_MISMATCH",
+            "The path and body reservation IDs do not match.",
+        )
+    profile = request.resource_profile
     try:
-        reservation = ReservationService(session).commit(reservation_id)
+        reservation = ReservationService(session).commit(
+            reservation_id,
+            request_id=request.request_id,
+            requested_at=request.requested_at,
+            instance_id=request.instance_id,
+            runtime_workload_id=request.runtime_workload_id,
+            cpu_millicores=profile.cpu_millicores,
+            memory_mib=profile.memory_mib,
+            ephemeral_storage_mib=profile.ephemeral_storage_mib,
+        )
         return _response(reservation)
     except ReservationNotFoundError:
         return _error(
@@ -231,6 +272,24 @@ def commit_reservation(
             409,
             "INVALID_RESERVATION_STATE",
             "The reservation cannot be committed in its current state.",
+        )
+    except ReservationInstanceMismatchError:
+        return _error(
+            409,
+            "INSTANCE_ID_MISMATCH",
+            "The instance does not own this reservation.",
+        )
+    except DeployedSpecMismatchError:
+        return _error(
+            409,
+            "DEPLOYED_SPEC_MISMATCH",
+            "The deployed resource profile differs from the reservation.",
+        )
+    except ReservationMutationConflictError:
+        return _error(
+            409,
+            "REQUEST_ID_REUSED",
+            "The commit request ID was already used with different data.",
         )
     except SchedulerConfigurationError:
         return _error(
@@ -255,16 +314,30 @@ def commit_reservation(
         status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
         status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
         status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
     },
 )
 def release_reservation(
     reservation_id: UUID,
+    request: ReservationReleaseRequest,
     session: Session = Depends(get_db_session),
 ) -> ReservationResponse | Response:
+    if request.reservation_id != reservation_id:
+        return _error(
+            409,
+            "RESERVATION_ID_MISMATCH",
+            "The path and body reservation IDs do not match.",
+        )
     try:
-        reservation = ReservationService(session).release(reservation_id)
+        reservation = ReservationService(session).release(
+            reservation_id,
+            request_id=request.request_id,
+            requested_at=request.requested_at,
+            instance_id=request.instance_id,
+            release_reason=request.release_reason,
+        )
         return _response(reservation)
     except ReservationNotFoundError:
         return _error(
@@ -277,6 +350,18 @@ def release_reservation(
             409,
             "INVALID_RESERVATION_STATE",
             "The reservation cannot be released in its current state.",
+        )
+    except ReservationInstanceMismatchError:
+        return _error(
+            409,
+            "INSTANCE_ID_MISMATCH",
+            "The instance does not own this reservation.",
+        )
+    except ReservationMutationConflictError:
+        return _error(
+            409,
+            "REQUEST_ID_REUSED",
+            "The release request ID was already used with different data.",
         )
     except SchedulerConfigurationError:
         return _error(
