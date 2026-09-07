@@ -34,6 +34,21 @@ installer 다운로드 내용이 bundle에 고정된 checksum과 달라 실행 �
 [installer pin](../deploy/bootstrap/README.md#k3s-installer-pin-갱신)에 기록한다.
 checksum 검사는 유지하며, 선택한 k3s 버전과 Agent digest를 임의로 바꾸지 않는다.
 
+## k3s 인증정보 업로드 HTTP 422
+
+VM 로그에 `Broker k3s credential upload failed with HTTP 422`가 표시되고 Broker
+access log에도 같은 POST가 422로 기록되면 정상 k3s kubeconfig가 Broker 검증에서
+거절된 것일 수 있다. k3s kubeconfig의 `certificate-authority-data`는 API 서버용
+server CA이고 관리자 client certificate는 별도의 client CA가 서명한다. 따라서
+client certificate가 kubeconfig의 server CA에서 직접 발급됐는지 검사하면 정상
+k3s 인증정보도 항상 거절된다.
+
+Broker는 server CA, client certificate, private key의 형식과 관리자 identity,
+certificate/key 일치, fingerprint, 만료시각을 계속 검증하되 server CA와 client
+certificate 사이의 직접 발급 관계는 요구하지 않는다. 이 수정은 중앙 Broker
+Python 코드만 변경하므로 Bootstrap 0.4.2 bundle과 Node Agent image를 다시 만들지
+않는다.
+
 ## 중앙 Broker 배포
 
 최신 수정 코드와 기존 `.env`, CA가 준비된 저장소 루트에서 Bash로 실행한다.

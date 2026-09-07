@@ -13,7 +13,6 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.x509.oid import NameOID
@@ -324,11 +323,13 @@ def _validate_kubeconfig(
             _decode_embedded_value(keys[0]),
             password=None,
         )
-        authority = x509.load_pem_x509_certificate(
+        x509.load_pem_x509_certificate(
             _decode_embedded_value(authorities[0])
         )
-        certificate.verify_directly_issued_by(authority)
-    except (ValueError, TypeError, InvalidSignature) as error:
+        # The kubeconfig CA authenticates the API server. k3s signs the admin
+        # client certificate with a separate client CA, which is intentionally
+        # not included in the portable kubeconfig.
+    except (ValueError, TypeError) as error:
         raise InvalidK3sCredentialError from error
 
     common_names = certificate.subject.get_attributes_for_oid(
