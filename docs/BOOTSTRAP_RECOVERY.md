@@ -45,6 +45,25 @@ VM 실행이 실패해도 Broker에서 결과 조회 또는 임시 Cloud 리소�
 runner로 바꾸지 않는다. 기본 제한시간은 2시간이지만 정리가 계속 실패하면
 제한시간이 지나도 RUNNING이 남을 수 있다.
 
+보고서에서 결과를 판정할 수 없으면 Broker는 정책 자체의 존재 여부도 조회한다.
+정책 GET이 `NotFound`이면 해당 job의 임시 정책/라벨 정리를 재시도하고, 정리가
+성공한 뒤 `FAILED / GCP_BOOTSTRAP_ASSIGNMENT_MISSING`으로 종료한다.
+정책이 삭제된 뒤 보고서가 사라져도 제한시간까지 계속 기다리지 않는다.
+실제 실행 결과를 증명할 수 없으므로 성공으로 추정하지 않는다.
+정책이 아직 존재하면 기존처럼 보고서를 기다린다. 권한·인증·네트워크 오류를
+정책 부재로 취급하지 않으며, 임시 라벨 정리가 실패하면 작업을 활성 상태로 유지한다.
+
+이 복구 수정은 중앙 Broker의 Python 코드만 변경한다. 최신 코드를 중앙에 반영하고:
+
+```bash
+docker compose -f compose.yaml -f compose.agent-enrollment.yaml up -d --build app
+```
+
+기존 작업이 다음 처리 차례에서 FAILED로 바뀌고 `completed_at`이 기록되는지
+Admin에서 확인한다. 제한시간을 이미 넘겼다면 `BOOTSTRAP_JOB_TIMEOUT`으로
+종료될 수 있다. 이는 예상 가능한 실패 작업 종료이며 VM 재설치가 아니다.
+Node Agent 이미지, Bootstrap bundle 0.4.1, DB schema는 이 복구 수정으로 바뀌지 않는다.
+
 중앙 Broker에서 새 진단 로그를 확인한다.
 
 ```bash
@@ -56,6 +75,8 @@ docker compose -f compose.yaml -f compose.agent-enrollment.yaml logs --since=10m
 SDK 원문 오류, runner 본문, JWT, kubeconfig는 출력하지 않는다.
 
 - `stage=read_report`: GCP 실행 결과 조회 단계 오류.
+- `stage=check_assignment`: 결과 대기 중 정책 존재 여부 조회 오류.
+- `stage=cleanup_missing_assignment`: 정책이 사라진 작업의 임시 리소스 정리 오류.
 - `stage=cleanup_after_report`: 결과 조회 후 임시 정책/라벨 정리 단계 오류.
 - `stage=cleanup_after_timeout`: 제한시간 초과 후 정리 단계 오류.
 - `stage=apply`: 정책/라벨 적용 단계 오류.
@@ -64,6 +85,10 @@ Admin에서 이전 작업이 FAILED 등 종료 상태로 바뀌는지 확인한�
 RUNNING이 계속되면 위 진단 로그를 전달해 해당 단계의 오류를 먼저 해결한다.
 DB 상태를 강제로 덮어쓰거나 활성 Cloud 정책을 남긴 채 새 작업을 만들지 않는다.
 현재 API는 동일 VM에 활성 작업이 있으면 새 작업을 409로 거절한다.
+
+정책/보고서가 모두 없는 기존 작업의 종료를 확인한 뒤 새 0.4.1 UPDATE를 생성한다.
+새 정책이 존재하고 보고서가 아직 없을 때는 RUNNING을 유지해야 하며, 새 작업의
+완료 marker, kubeconfig 업로드와 SUCCEEDED까지 아래 절차로 확인한다.
 
 ## 새 UPDATE와 대상 VM 확인
 

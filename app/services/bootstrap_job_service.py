@@ -516,6 +516,22 @@ class BootstrapJobService:
                 job.provider_job_id or _assignment_id(job.job_id)
             )
             if compliance is None:
+                # A report may disappear after policy deletion even if cleanup
+                # failed before the job's terminal state was saved.
+                stage = "check_assignment"
+                if not adapter.assignment_exists(
+                    job.provider_job_id or _assignment_id(job.job_id)
+                ):
+                    stage = "cleanup_missing_assignment"
+                    self._cleanup_gcp(adapter, job)
+                    self._complete(
+                        job,
+                        BootstrapJobStatus.FAILED,
+                        "GCP_BOOTSTRAP_ASSIGNMENT_MISSING",
+                        "The GCP bootstrap policy is missing and its result "
+                        "cannot be confirmed. Create a new bootstrap job.",
+                    )
+                    return
                 job.updated_at = now
                 self._session.commit()
                 return

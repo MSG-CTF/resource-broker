@@ -23,6 +23,7 @@ class InstancesClient(Protocol):
 
 class OsConfigClient(Protocol):
     def create_os_policy_assignment(self, **kwargs: Any) -> Any: ...
+    def get_os_policy_assignment(self, **kwargs: Any) -> Any: ...
     def get_os_policy_assignment_report(self, **kwargs: Any) -> Any: ...
     def delete_os_policy_assignment(self, **kwargs: Any) -> Any: ...
 
@@ -190,6 +191,27 @@ class GcpBootstrapAdapter:
             if isinstance(error, AlreadyExists):
                 return
             raise _translate_google_error(self._target.project_id, error) from error
+
+    def assignment_exists(self, assignment_id: str) -> bool:
+        name = (
+            f"projects/{self._target.project_id}/locations/{self._target.zone}"
+            f"/osPolicyAssignments/{assignment_id}"
+        )
+        try:
+            self._os_config.get_os_policy_assignment(
+                name=name,
+                retry=None,
+                timeout=30,
+            )
+        except Exception as error:
+            try:
+                from google.api_core.exceptions import NotFound
+            except ModuleNotFoundError:
+                NotFound = ()
+            if isinstance(error, NotFound):
+                return False
+            raise _translate_google_error(self._target.project_id, error) from error
+        return True
 
     def compliance(self, assignment_id: str) -> bool | None:
         name = (
