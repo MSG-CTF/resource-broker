@@ -48,6 +48,13 @@ _AWS_OPT_IN_TAG_KEY = "msg-broker-bootstrap"
 _AWS_OPT_IN_TAG_VALUE = "enabled"
 _AZURE_OPT_IN_TAG_KEY = "msg-broker-bootstrap"
 _AZURE_OPT_IN_TAG_VALUE = "enabled"
+_GCP_SUCCESS_CLEANUP_PENDING = "GCP_BOOTSTRAP_SUCCESS_CLEANUP_PENDING"
+_GCP_FAILURE_CLEANUP_PENDING = frozenset(
+    {
+        "BOOTSTRAP_ENFORCEMENT_FAILED",
+        "BOOTSTRAP_JOB_TIMEOUT",
+    }
+)
 _SUPPORTED_BOOTSTRAP_ARCHITECTURES = frozenset(
     {Architecture.AMD64, Architecture.ARM64}
 )
@@ -500,11 +507,17 @@ class BootstrapJobService:
                 self._session.commit()
                 return
 
+            if self._has_pending_gcp_outcome(job):
+                stage = "cleanup_pending_result"
+                self._cleanup_gcp(adapter, job)
+                self._complete_pending_gcp_outcome(job)
+                return
+
             now = datetime.now(UTC)
             if now >= job.deadline_at:
                 stage = "cleanup_after_timeout"
-                self._cleanup_gcp(adapter, job)
-                self._complete(
+                self._finish_gcp_after_cleanup(
+                    adapter,
                     job,
                     BootstrapJobStatus.FAILED,
                     "BOOTSTRAP_JOB_TIMEOUT",
@@ -524,6 +537,8 @@ class BootstrapJobService:
                 ):
                     stage = "cleanup_missing_assignment"
                     self._cleanup_gcp(adapter, job)
+                    if self._complete_pending_gcp_outcome(job):
+                        return
                     self._complete(
                         job,
                         BootstrapJobStatus.FAILED,
@@ -536,11 +551,17 @@ class BootstrapJobService:
                 self._session.commit()
                 return
             stage = "cleanup_after_report"
-            self._cleanup_gcp(adapter, job)
             if compliance:
-                self._complete(job, BootstrapJobStatus.SUCCEEDED, None, None)
+                self._finish_gcp_after_cleanup(
+                    adapter,
+                    job,
+                    BootstrapJobStatus.SUCCEEDED,
+                    None,
+                    None,
+                )
             else:
-                self._complete(
+                self._finish_gcp_after_cleanup(
+                    adapter,
                     job,
                     BootstrapJobStatus.FAILED,
                     "BOOTSTRAP_ENFORCEMENT_FAILED",
@@ -558,14 +579,20 @@ class BootstrapJobService:
             )
             self._handle_gcp_error(adapter, job, error)
         except Exception:
+            pending_outcome = self._has_pending_gcp_outcome(job)
             try:
                 self._cleanup_gcp(adapter, job)
             except Exception:
-                job.error_code = "BOOTSTRAP_CLEANUP_PENDING"
-                job.error_message = (
-                    "An internal error occurred and cleanup will be retried."
-                )
+                if not pending_outcome:
+                    job.error_code = "BOOTSTRAP_CLEANUP_PENDING"
+                    job.error_message = (
+                        "An internal error occurred and cleanup will be retried."
+                    )
+                job.updated_at = datetime.now(UTC)
                 self._session.commit()
+                return
+            if pending_outcome:
+                self._complete_pending_gcp_outcome(job)
                 return
             self._complete(
                 job,
@@ -784,12 +811,58 @@ class BootstrapJobService:
             job.temporary_label_value,
         )
 
+    def _finish_gcp_after_cleanup(
+        self,
+        adapter: GcpBootstrapAdapter,
+        job: BootstrapJobTable,
+        status: BootstrapJobStatus,
+        error_code: str | None,
+        error_message: str | None,
+    ) -> None:
+        if status is BootstrapJobStatus.SUCCEEDED:
+            job.error_code = _GCP_SUCCESS_CLEANUP_PENDING
+            job.error_message = (
+                "Bootstrap succeeded and temporary GCP resources are being cleaned up."
+            )
+        else:
+            job.error_code = error_code
+            job.error_message = error_message
+        self._session.commit()
+
+        self._cleanup_gcp(adapter, job)
+        self._complete(job, status, error_code, error_message)
+
+    def _complete_pending_gcp_outcome(self, job: BootstrapJobTable) -> bool:
+        if job.error_code == _GCP_SUCCESS_CLEANUP_PENDING:
+            self._complete(job, BootstrapJobStatus.SUCCEEDED, None, None)
+            return True
+        if job.error_code in _GCP_FAILURE_CLEANUP_PENDING:
+            self._complete(
+                job,
+                BootstrapJobStatus.FAILED,
+                job.error_code,
+                job.error_message,
+            )
+            return True
+        return False
+
+    @staticmethod
+    def _has_pending_gcp_outcome(job: BootstrapJobTable) -> bool:
+        return (
+            job.error_code == _GCP_SUCCESS_CLEANUP_PENDING
+            or job.error_code in _GCP_FAILURE_CLEANUP_PENDING
+        )
+
     def _handle_gcp_error(
         self,
         adapter: GcpBootstrapAdapter,
         job: BootstrapJobTable,
         error: GcpAdapterError,
     ) -> None:
+        if self._has_pending_gcp_outcome(job):
+            job.updated_at = datetime.now(UTC)
+            self._session.commit()
+            return
         if isinstance(error, GcpBootstrapConflictError):
             self._complete(
                 job,

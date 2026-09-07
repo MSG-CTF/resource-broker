@@ -241,14 +241,84 @@ class GcpBootstrapAdapter:
             )
             for compliance in compliances
         )
-        if any("NON_COMPLIANT" in name for name in state_names):
-            return False
         if all(
             name.endswith("COMPLIANT") and "NON_COMPLIANT" not in name
             for name in state_names
         ):
             return True
+        if any(
+            "NON_COMPLIANT" not in name
+            and not name.endswith("COMPLIANT")
+            for name in state_names
+        ):
+            return None
+        non_compliant = tuple(
+            compliance
+            for compliance, state_name in zip(
+                compliances,
+                state_names,
+                strict=True,
+            )
+            if "NON_COMPLIANT" in state_name
+        )
+        if non_compliant and all(
+            self._non_compliance_is_final(compliance)
+            for compliance in non_compliant
+        ):
+            return False
         return None
+
+    def _non_compliance_is_final(self, compliance: object) -> bool:
+        resources = tuple(
+            getattr(compliance, "os_policy_resource_compliances", None) or ()
+        )
+        if not resources:
+            return False
+
+        state_names = tuple(
+            self._compliance_state_name(
+                getattr(resource, "compliance_state", None)
+            )
+            for resource in resources
+        )
+        if any(
+            "NON_COMPLIANT" not in name
+            and not name.endswith("COMPLIANT")
+            for name in state_names
+        ):
+            return False
+        failed_resources = tuple(
+            resource
+            for resource, state_name in zip(
+                resources,
+                state_names,
+                strict=True,
+            )
+            if "NON_COMPLIANT" in state_name
+        )
+        if not failed_resources:
+            return False
+        return all(
+            any(
+                self._is_post_enforcement_step(step)
+                for step in tuple(getattr(resource, "config_steps", None) or ())
+            )
+            for resource in failed_resources
+        )
+
+    @staticmethod
+    def _is_post_enforcement_step(step: object) -> bool:
+        # OSPolicyResourceConfigStep.Type value 4 is the final desired-state
+        # check performed after enforcement. Proto-plus exposes this field as
+        # ``type_`` because ``type`` is a Python built-in.
+        step_type = getattr(step, "type_", getattr(step, "type", None))
+        name = getattr(step_type, "name", None)
+        if isinstance(name, str):
+            return name.upper() == "DESIRED_STATE_CHECK_POST_ENFORCEMENT"
+        try:
+            return int(step_type) == 4
+        except (TypeError, ValueError):
+            return False
 
     def _compliance_state_name(self, state: object) -> str:
         name = getattr(state, "name", None)
@@ -272,6 +342,13 @@ class GcpBootstrapAdapter:
         try:
             operation = self._os_config.delete_os_policy_assignment(name=name)
             operation.result(timeout=120)
+        except TypeError as error:
+            # Some successful delete LROs fail while decoding the Empty
+            # response. Confirm the resource is actually gone before treating
+            # that client-side error as a cleanup failure.
+            if not self.assignment_exists(assignment_id):
+                return
+            raise _translate_google_error(self._target.project_id, error) from error
         except Exception as error:
             try:
                 from google.api_core.exceptions import NotFound

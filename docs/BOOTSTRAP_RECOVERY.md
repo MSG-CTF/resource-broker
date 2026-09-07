@@ -47,9 +47,23 @@ docker compose -f compose.yaml -f compose.agent-enrollment.yaml exec -T app \
 ```
 
 기대 결과: app/frontend healthy, migrate 정상 종료, 0.4.2 bundle 존재.
-이번 수정에는 추가 DB migration, IAM 변경, Nginx 경로 변경이 없다.
+이번 수정에는 추가 DB migration과 IAM 변경이 없다. Agent 공개 호스트의 Nginx에는
+`POST /v1/agent/bootstrap-jobs/.../k3s-credentials` 전달 경로가 필요하다.
 Node Agent는 0.2.1 그대로이므로 이미 push한 multi-platform index digest를 재사용한다.
 기존 0.4.0/0.4.1 bundle URL에 새 내용을 덮어쓰지 않는다.
+
+Nginx 설정을 반영한 뒤 빈 JSON으로 업로드 경로만 확인할 수 있다.
+
+```bash
+curl -i -sS -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{}' \
+  'https://agents.example.com/v1/agent/bootstrap-jobs/<JOB_ID>/k3s-credentials'
+```
+
+기대 결과는 `422 Unprocessable Entity`와 필수 body field 목록이다. 이는 요청이
+Nginx의 404에서 끝나지 않고 Broker API까지 도달했다는 뜻이다. 빈 body이므로
+인증정보가 저장되지는 않는다.
 
 ## 기존 RUNNING 작업
 
@@ -58,13 +72,20 @@ VM 실행이 실패해도 Broker에서 결과 조회 또는 임시 Cloud 리소�
 runner로 바꾸지 않는다. 기본 제한시간은 2시간이지만 정리가 계속 실패하면
 제한시간이 지나도 RUNNING이 남을 수 있다.
 
+GCP의 `NON_COMPLIANT`는 enforce 실행 전 검사에서도 나타날 수 있다. Broker는
+resource config step에 최종 `DESIRED_STATE_CHECK_POST_ENFORCEMENT`가 기록될 때까지
+이를 실행 중 상태로 취급하고, 최종 검사 뒤의 `NON_COMPLIANT`만 실패로 확정한다.
+
 보고서에서 결과를 판정할 수 없으면 Broker는 정책 자체의 존재 여부도 조회한다.
 정책 GET이 `NotFound`이면 해당 job의 임시 정책/라벨 정리를 재시도하고, 정리가
-성공한 뒤 `FAILED / GCP_BOOTSTRAP_ASSIGNMENT_MISSING`으로 종료한다.
+성공한 뒤 보존된 성공/실패 결과가 있으면 그 결과로 종료한다. 보존된 결과가
+없을 때만 `FAILED / GCP_BOOTSTRAP_ASSIGNMENT_MISSING`으로 종료한다.
 정책이 삭제된 뒤 보고서가 사라져도 제한시간까지 계속 기다리지 않는다.
 실제 실행 결과를 증명할 수 없으므로 성공으로 추정하지 않는다.
 정책이 아직 존재하면 기존처럼 보고서를 기다린다. 권한·인증·네트워크 오류를
 정책 부재로 취급하지 않으며, 임시 라벨 정리가 실패하면 작업을 활성 상태로 유지한다.
+삭제 LRO가 실제 정책을 지운 뒤 빈 응답 변환에서 `TypeError`를 내는 경우에는 정책
+부재를 다시 확인해 성공한 삭제로 처리한다.
 
 이 복구 수정은 중앙 Broker의 Python 코드만 변경한다. 최신 코드를 중앙에 반영하고:
 
@@ -92,6 +113,7 @@ SDK 원문 오류, runner 본문, JWT, kubeconfig는 출력하지 않는다.
 - `stage=read_report`: GCP 실행 결과 조회 단계 오류.
 - `stage=check_assignment`: 결과 대기 중 정책 존재 여부 조회 오류.
 - `stage=cleanup_missing_assignment`: 정책이 사라진 작업의 임시 리소스 정리 오류.
+- `stage=cleanup_pending_result`: 이미 판정한 결과를 보존한 정리 재시도 오류.
 - `stage=cleanup_after_report`: 결과 조회 후 임시 정책/라벨 정리 단계 오류.
 - `stage=cleanup_after_timeout`: 제한시간 초과 후 정리 단계 오류.
 - `stage=apply`: 정책/라벨 적용 단계 오류.
