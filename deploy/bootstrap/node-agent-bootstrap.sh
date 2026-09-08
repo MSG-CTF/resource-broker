@@ -1,0 +1,1072 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+ACTION="${1:-}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+
+RESOURCE_TARGET_ID="${MSG_BROKER_RESOURCE_TARGET_ID:-}"
+BOOTSTRAP_JOB_ID="${MSG_BROKER_BOOTSTRAP_JOB_ID:-}"
+K3S_VERSION="${MSG_BROKER_K3S_VERSION:-}"
+AGENT_IMAGE="${MSG_BROKER_AGENT_IMAGE:-}"
+ENROLLMENT_TOKEN_FILE="${MSG_BROKER_ENROLLMENT_TOKEN_FILE:-}"
+ENROLLMENT_MODE="${MSG_BROKER_ENROLLMENT_MODE:-token}"
+ENROLLMENT_AUDIENCE="${MSG_BROKER_ENROLLMENT_AUDIENCE:-}"
+AZURE_ATTESTATION_NONCE="${MSG_BROKER_AZURE_ATTESTATION_NONCE:-}"
+ENROLLMENT_URL="${MSG_BROKER_ENROLLMENT_URL:-https://agents.mjsec.kr/v1/agent/enrollments}"
+OBSERVATIONS_URL="${MSG_BROKER_OBSERVATIONS_URL:-https://agents.mjsec.kr/v1/agent/observations}"
+MANIFEST_DIR="${MSG_BROKER_MANIFEST_DIR:-${PROJECT_ROOT}/node-agent/k8s}"
+TLS_DIR="${MSG_BROKER_AGENT_TLS_DIR:-/etc/msg-broker-agent/tls}"
+STATE_DIR="${MSG_BROKER_BOOTSTRAP_STATE_DIR:-/var/lib/msg-broker-bootstrap}"
+STATE_FILE="${STATE_DIR}/node-agent.state"
+RENEW_BEFORE_SECONDS="${MSG_BROKER_CERT_RENEW_BEFORE_SECONDS:-604800}"
+DELIVERY_TIMEOUT_SECONDS="${MSG_BROKER_DELIVERY_TIMEOUT_SECONDS:-90}"
+VERIFY_DELIVERY="${MSG_BROKER_VERIFY_DELIVERY:-true}"
+# Pin the installer source independently from the requested k3s binary version.
+# Upstream k3s-io/k3s commit dated 2026-09-03; see README.md for provenance.
+K3S_INSTALL_URL="${MSG_BROKER_K3S_INSTALL_URL:-https://raw.githubusercontent.com/k3s-io/k3s/2977c525a2e7a487886107ce4df43630ae9b03b2/install.sh}"
+K3S_INSTALL_SHA256="${MSG_BROKER_K3S_INSTALL_SHA256:-e5cc3b3d9dfc1662c2d9be6da5abc9a4cd317d6abc3a5ffc02e3dd3248207fee}"
+K3S_ADMIN_KUBECONFIG_FILE="${MSG_BROKER_K3S_ADMIN_KUBECONFIG_FILE:-/etc/rancher/k3s/k3s.yaml}"
+K3S_CREDENTIAL_UPLOAD_URL="${MSG_BROKER_K3S_CREDENTIAL_UPLOAD_URL:-}"
+K3S_SERVER_URL="${MSG_BROKER_K3S_SERVER_URL:-}"
+K3S_CREDENTIAL_UPLOAD_TOKEN_FILE="${MSG_BROKER_K3S_CREDENTIAL_UPLOAD_TOKEN_FILE:-}"
+K3S_CREDENTIAL_UPLOAD_REQUIRED="${MSG_BROKER_K3S_CREDENTIAL_UPLOAD_REQUIRED:-false}"
+K3S_CREDENTIAL_FINGERPRINT=""
+K3S_CREDENTIAL_NOT_AFTER=""
+WORK_DIR=""
+
+log() {
+  printf '[msg-broker-bootstrap] %s\n' "$*"
+}
+
+fail() {
+  printf '[msg-broker-bootstrap] ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  if [[ -n "${WORK_DIR}" && -d "${WORK_DIR}" ]]; then
+    rm -rf -- "${WORK_DIR}"
+  fi
+}
+trap cleanup EXIT
+
+usage() {
+  cat <<'EOF'
+Usage: sudo env <settings> bash node-agent-bootstrap.sh <action>
+
+Actions:
+  install                    Install/reconcile k3s, certificate, and Node Agent.
+  update                     Reconcile to the requested k3s and Node Agent versions.
+  upload-k3s-credential      Upload the existing k3s admin kubeconfig to Broker.
+  check                      Verify k3s, Agent certificate, and delivery state.
+  remove                     Remove only the Node Agent and local certificate.
+
+Required settings for install/update:
+  MSG_BROKER_RESOURCE_TARGET_ID=<canonical-lowercase-uuid>
+  MSG_BROKER_K3S_VERSION=<vX.Y.Z+k3sN>
+  MSG_BROKER_AGENT_IMAGE=<repository>@sha256:<64-hex-digest>
+
+Pinned k3s installer defaults:
+  MSG_BROKER_K3S_INSTALL_URL=https://raw.githubusercontent.com/k3s-io/k3s/2977c525a2e7a487886107ce4df43630ae9b03b2/install.sh
+  MSG_BROKER_K3S_INSTALL_SHA256=e5cc3b3d9dfc1662c2d9be6da5abc9a4cd317d6abc3a5ffc02e3dd3248207fee
+
+Required for token enrollment when no usable certificate is already installed:
+  MSG_BROKER_ENROLLMENT_TOKEN_FILE=<root-readable-token-file>
+
+GCP automated enrollment instead uses:
+  MSG_BROKER_ENROLLMENT_MODE=gcp-identity
+  MSG_BROKER_ENROLLMENT_AUDIENCE=<exact Broker audience URL>
+
+AWS automated enrollment instead uses:
+  MSG_BROKER_ENROLLMENT_MODE=aws-instance-identity
+
+Azure automated enrollment instead uses:
+  MSG_BROKER_ENROLLMENT_MODE=azure-attested-identity
+  MSG_BROKER_AZURE_ATTESTATION_NONCE=<job-bound-10-digit-nonce>
+
+Optional Broker kubeconfig storage for install/update,
+and required settings for upload-k3s-credential:
+  MSG_BROKER_BOOTSTRAP_JOB_ID=<canonical-lowercase-uuid>
+  MSG_BROKER_K3S_CREDENTIAL_UPLOAD_URL=<https-broker-upload-url>
+  MSG_BROKER_K3S_SERVER_URL=<https-vm-address:6443>
+  MSG_BROKER_K3S_CREDENTIAL_UPLOAD_TOKEN_FILE=<absolute-root-readable-token-path>
+  MSG_BROKER_K3S_CREDENTIAL_UPLOAD_REQUIRED=true|false
+EOF
+}
+
+require_root() {
+  if [[ ${EUID} -ne 0 ]]; then
+    fail "Run this script as root."
+  fi
+}
+
+validate_platform() {
+  if [[ ! -r /etc/os-release ]]; then
+    fail "Ubuntu could not be identified because /etc/os-release is missing."
+  fi
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  if [[ "${ID:-}" != "ubuntu" ]]; then
+    fail "Only Ubuntu is supported by this Bootstrap version."
+  fi
+  case "$(uname -m)" in
+    x86_64 | amd64 | aarch64 | arm64)
+      ;;
+    *)
+      fail "Only Ubuntu AMD64 and ARM64 are supported by this Bootstrap version."
+      ;;
+  esac
+}
+
+require_https_url() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "${value}" =~ ^https://[^[:space:]]+$ ]]; then
+    fail "${name} must be an https:// URL without whitespace."
+  fi
+}
+
+require_k3s_credential_upload_url() {
+  local value="$1"
+  if [[ "${value}" =~ ^https://[^[:space:]]+$ ]]; then
+    return
+  fi
+  fail "MSG_BROKER_K3S_CREDENTIAL_UPLOAD_URL must use HTTPS."
+}
+
+validate_non_negative_integer() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+    fail "${name} must be a non-negative integer."
+  fi
+}
+
+validate_resource_target_id() {
+  if [[ ! "${RESOURCE_TARGET_ID}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    fail "MSG_BROKER_RESOURCE_TARGET_ID must be a canonical lowercase UUID."
+  fi
+}
+
+validate_desired_versions() {
+  if [[ ! "${K3S_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\+k3s[0-9]+$ ]]; then
+    fail "MSG_BROKER_K3S_VERSION must look like vX.Y.Z+k3sN."
+  fi
+  if [[ ! "${AGENT_IMAGE}" =~ ^[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}$ ]]; then
+    fail "MSG_BROKER_AGENT_IMAGE must be pinned by a sha256 digest."
+  fi
+  if [[ ! "${K3S_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+    fail "MSG_BROKER_K3S_INSTALL_SHA256 must be a lowercase sha256 digest."
+  fi
+}
+
+state_value() {
+  local key="$1"
+  if [[ ! -r "${STATE_FILE}" ]]; then
+    return 0
+  fi
+  sed -n "s/^${key}=//p" "${STATE_FILE}" | head -n 1
+}
+
+load_state_defaults() {
+  if [[ -z "${RESOURCE_TARGET_ID}" ]]; then
+    RESOURCE_TARGET_ID="$(state_value RESOURCE_TARGET_ID)"
+  fi
+  if [[ -z "${K3S_VERSION}" ]]; then
+    K3S_VERSION="$(state_value K3S_VERSION)"
+  fi
+  if [[ -z "${AGENT_IMAGE}" ]]; then
+    AGENT_IMAGE="$(state_value AGENT_IMAGE)"
+  fi
+}
+
+install_dependencies() {
+  local missing=false
+  local command_name
+  for command_name in curl jq openssl sha256sum; do
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
+      missing=true
+    fi
+  done
+  if [[ "${missing}" == "false" ]]; then
+    return
+  fi
+
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install --yes --no-install-recommends \
+    ca-certificates \
+    coreutils \
+    curl \
+    jq \
+    openssl
+}
+
+current_k3s_version() {
+  if ! command -v k3s >/dev/null 2>&1; then
+    return 0
+  fi
+  k3s --version 2>/dev/null | awk 'NR == 1 {print $3}'
+}
+
+install_or_update_k3s() {
+  local current_version k3s_api_tls_san install_required install_exec
+  current_version="$(current_k3s_version)"
+  k3s_api_tls_san="$(k3s_credential_tls_san)"
+  install_required=false
+  if [[ "${current_version}" != "${K3S_VERSION}" ]]; then
+    install_required=true
+  elif [[ -n "${k3s_api_tls_san}" ]] \
+      && ! openssl x509 \
+        -in /var/lib/rancher/k3s/server/tls/serving-kube-apiserver.crt \
+        -noout \
+        -checkip "${k3s_api_tls_san}" >/dev/null 2>&1; then
+    install_required=true
+  fi
+
+  if [[ "${install_required}" == "false" ]]; then
+    log "k3s ${K3S_VERSION} is already installed."
+  else
+    require_https_url "MSG_BROKER_K3S_INSTALL_URL" "${K3S_INSTALL_URL}"
+    WORK_DIR="$(mktemp -d)"
+    curl \
+      --fail \
+      --silent \
+      --show-error \
+      --location \
+      --proto '=https' \
+      --tlsv1.2 \
+      "${K3S_INSTALL_URL}" \
+      --output "${WORK_DIR}/install-k3s.sh"
+    if [[ ! -s "${WORK_DIR}/install-k3s.sh" ]]; then
+      fail "The k3s installer download was empty."
+    fi
+    if ! printf '%s  %s\n' \
+        "${K3S_INSTALL_SHA256}" \
+        "${WORK_DIR}/install-k3s.sh" \
+        | sha256sum --check --strict; then
+      fail "The k3s installer checksum did not match the pinned SHA-256."
+    fi
+    log "Verified the pinned k3s installer SHA-256."
+    log "Installing k3s ${K3S_VERSION}."
+    install_exec="server --write-kubeconfig-mode=0600"
+    if [[ -n "${k3s_api_tls_san}" ]]; then
+      install_exec="${install_exec} --tls-san ${k3s_api_tls_san}"
+    fi
+    INSTALL_K3S_VERSION="${K3S_VERSION}" \
+      INSTALL_K3S_EXEC="${install_exec}" \
+      sh "${WORK_DIR}/install-k3s.sh"
+    rm -rf -- "${WORK_DIR}"
+    WORK_DIR=""
+  fi
+
+  systemctl enable --now k3s
+  local attempt
+  for attempt in $(seq 1 60); do
+    if systemctl is-active --quiet k3s \
+        && k3s kubectl get nodes >/dev/null 2>&1; then
+      if [[ -n "${k3s_api_tls_san}" ]] \
+          && ! openssl x509 \
+            -in /var/lib/rancher/k3s/server/tls/serving-kube-apiserver.crt \
+            -noout \
+            -checkip "${k3s_api_tls_san}" >/dev/null 2>&1; then
+        fail "The k3s serving certificate does not contain the configured API address."
+      fi
+      return 0
+    fi
+    sleep 2
+  done
+  fail "k3s did not become ready within 120 seconds."
+}
+
+k3s_credential_upload_is_configured() {
+  [[ -n "${K3S_CREDENTIAL_UPLOAD_URL}" ]]
+}
+
+k3s_credential_tls_san() {
+  if [[ -z "${K3S_SERVER_URL}" ]]; then
+    return 0
+  fi
+  local authority
+  authority="${K3S_SERVER_URL#https://}"
+  if [[ "${authority}" =~ ^\[([0-9A-Fa-f:]+)\]:6443$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "${authority}" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):6443$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  fail "MSG_BROKER_K3S_SERVER_URL must identify an IP address on port 6443."
+}
+
+validate_k3s_credential_upload_preflight() {
+  if [[ "${K3S_CREDENTIAL_UPLOAD_REQUIRED}" != "true" \
+      && "${K3S_CREDENTIAL_UPLOAD_REQUIRED}" != "false" ]]; then
+    fail "MSG_BROKER_K3S_CREDENTIAL_UPLOAD_REQUIRED must be true or false."
+  fi
+  if ! k3s_credential_upload_is_configured; then
+    if [[ "${K3S_CREDENTIAL_UPLOAD_REQUIRED}" == "true" ]]; then
+      fail "Broker k3s credential upload is required but its URL is missing."
+    fi
+    if [[ -n "${K3S_SERVER_URL}" \
+        || -n "${K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}" ]]; then
+      fail "MSG_BROKER_K3S_CREDENTIAL_UPLOAD_URL is required when any credential upload setting is configured."
+    fi
+    return
+  fi
+
+  if [[ ! "${BOOTSTRAP_JOB_ID}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    fail "MSG_BROKER_BOOTSTRAP_JOB_ID must be a canonical lowercase UUID."
+  fi
+  require_k3s_credential_upload_url "${K3S_CREDENTIAL_UPLOAD_URL}"
+  require_https_url \
+    "MSG_BROKER_K3S_SERVER_URL" \
+    "${K3S_SERVER_URL}"
+  k3s_credential_tls_san >/dev/null
+  if [[ "${K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}" != /* \
+      || ! -f "${K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}" \
+      || ! -r "${K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}" ]]; then
+    fail "MSG_BROKER_K3S_CREDENTIAL_UPLOAD_TOKEN_FILE must be an absolute, readable file."
+  fi
+}
+
+validate_k3s_credential_upload_configuration() {
+  validate_k3s_credential_upload_preflight
+  if ! k3s_credential_upload_is_configured; then
+    return 0
+  fi
+  if [[ "${K3S_ADMIN_KUBECONFIG_FILE}" != /* \
+      || ! -f "${K3S_ADMIN_KUBECONFIG_FILE}" \
+      || ! -r "${K3S_ADMIN_KUBECONFIG_FILE}" ]]; then
+    fail "MSG_BROKER_K3S_ADMIN_KUBECONFIG_FILE must be an absolute, readable file."
+  fi
+}
+
+render_broker_kubeconfig() {
+  local output_file="$1"
+  local server_count client_certificate_count client_key_count ca_count
+  server_count="$(grep -Ec '^[[:space:]]*server:[[:space:]]*https://[^[:space:]]+[[:space:]]*$' \
+    "${K3S_ADMIN_KUBECONFIG_FILE}" || true)"
+  client_certificate_count="$(grep -Ec '^[[:space:]]*client-certificate-data:[[:space:]]*[^[:space:]]+[[:space:]]*$' \
+    "${K3S_ADMIN_KUBECONFIG_FILE}" || true)"
+  client_key_count="$(grep -Ec '^[[:space:]]*client-key-data:[[:space:]]*[^[:space:]]+[[:space:]]*$' \
+    "${K3S_ADMIN_KUBECONFIG_FILE}" || true)"
+  ca_count="$(grep -Ec '^[[:space:]]*certificate-authority-data:[[:space:]]*[^[:space:]]+[[:space:]]*$' \
+    "${K3S_ADMIN_KUBECONFIG_FILE}" || true)"
+  if [[ "${server_count}" != "1" \
+      || "${client_certificate_count}" != "1" \
+      || "${client_key_count}" != "1" \
+      || "${ca_count}" != "1" ]]; then
+    fail "The k3s admin kubeconfig must contain exactly one embedded cluster and administrator credential."
+  fi
+
+  awk -v k3s_server="${K3S_SERVER_URL}" '
+    /^[[:space:]]*server:[[:space:]]*/ {
+      match($0, /^[[:space:]]*/)
+      indentation = substr($0, RSTART, RLENGTH)
+      print indentation "server: " k3s_server
+      next
+    }
+    { print }
+  ' "${K3S_ADMIN_KUBECONFIG_FILE}" > "${output_file}"
+  chmod 0600 "${output_file}"
+}
+
+read_k3s_client_certificate() {
+  local kubeconfig_file="$1"
+  local output_file="$2"
+  local encoded_certificate
+  encoded_certificate="$(sed -n \
+    's/^[[:space:]]*client-certificate-data:[[:space:]]*//p' \
+    "${kubeconfig_file}")"
+  if ! printf '%s' "${encoded_certificate}" \
+      | base64 --decode > "${output_file}" 2>/dev/null; then
+    fail "The embedded k3s administrator certificate is not valid base64."
+  fi
+  if ! openssl x509 -in "${output_file}" -noout >/dev/null 2>&1; then
+    fail "The embedded k3s administrator certificate is not a valid X.509 certificate."
+  fi
+  local certificate_subject
+  certificate_subject="$(openssl x509 \
+    -in "${output_file}" \
+    -noout \
+    -subject \
+    -nameopt RFC2253 \
+    | sed 's/^subject=//')"
+  if ! tr ',' '\n' <<< "${certificate_subject}" \
+      | grep -Fxq 'CN=system:admin' \
+      || ! tr ',' '\n' <<< "${certificate_subject}" \
+      | grep -Fxq 'O=system:masters'; then
+    fail "The embedded k3s credential is not the expected system administrator identity."
+  fi
+}
+
+verify_k3s_client_key() {
+  local kubeconfig_file="$1"
+  local certificate_file="$2"
+  local encoded_key key_file
+  key_file="${WORK_DIR}/runtime-client.key"
+  encoded_key="$(sed -n \
+    's/^[[:space:]]*client-key-data:[[:space:]]*//p' \
+    "${kubeconfig_file}")"
+  if ! printf '%s' "${encoded_key}" \
+      | base64 --decode > "${key_file}" 2>/dev/null; then
+    fail "The embedded k3s administrator private key is not valid base64."
+  fi
+  chmod 0600 "${key_file}"
+  if ! cmp -s \
+      <(openssl pkey -in "${key_file}" -pubout 2>/dev/null) \
+      <(openssl x509 -in "${certificate_file}" -pubkey -noout 2>/dev/null); then
+    fail "The embedded k3s administrator certificate and private key do not match."
+  fi
+}
+
+upload_k3s_credential() {
+  if ! k3s_credential_upload_is_configured; then
+    log "Broker k3s credential upload is not configured."
+    return
+  fi
+  validate_k3s_credential_upload_configuration
+
+  WORK_DIR="$(mktemp -d)"
+  chmod 0700 "${WORK_DIR}"
+  local kubeconfig_file certificate_file request_file
+  kubeconfig_file="${WORK_DIR}/broker-kubeconfig.yaml"
+  certificate_file="${WORK_DIR}/k3s-admin-client.crt"
+  request_file="${WORK_DIR}/k3s-credential-upload.json"
+
+  render_broker_kubeconfig "${kubeconfig_file}"
+  read_k3s_client_certificate \
+    "${kubeconfig_file}" \
+    "${certificate_file}"
+  verify_k3s_client_key \
+    "${kubeconfig_file}" \
+    "${certificate_file}"
+
+  K3S_CREDENTIAL_FINGERPRINT="$(openssl x509 \
+    -in "${certificate_file}" \
+    -noout \
+    -fingerprint \
+    -sha256 \
+    | sed 's/^[^=]*=//' \
+    | tr -d ':' \
+    | tr '[:upper:]' '[:lower:]')"
+  local raw_not_after generated_at kubeconfig_base64 delivery_token
+  raw_not_after="$(openssl x509 \
+    -in "${certificate_file}" \
+    -noout \
+    -enddate \
+    | sed 's/^notAfter=//')"
+  K3S_CREDENTIAL_NOT_AFTER="$(date -u \
+    --date "${raw_not_after}" \
+    '+%Y-%m-%dT%H:%M:%SZ')"
+  generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+  if ! kubeconfig_base64="$(base64 "${kubeconfig_file}" | tr -d '\r\n')"; then
+    fail "The Broker k3s credential request could not be serialized."
+  fi
+  printf '{"schema_version":1,"bootstrap_job_id":"%s","resource_target_id":"%s","server_url":"%s","kubeconfig_base64":"%s","client_certificate_fingerprint_sha256":"%s","client_certificate_not_after":"%s","generated_at":"%s"}\n' \
+    "${BOOTSTRAP_JOB_ID}" \
+    "${RESOURCE_TARGET_ID}" \
+    "${K3S_SERVER_URL}" \
+    "${kubeconfig_base64}" \
+    "${K3S_CREDENTIAL_FINGERPRINT}" \
+    "${K3S_CREDENTIAL_NOT_AFTER}" \
+    "${generated_at}" \
+    > "${request_file}"
+  chmod 0600 "${request_file}"
+  unset kubeconfig_base64
+
+  delivery_token="$(tr -d '\r\n' \
+    < "${K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}")"
+  if [[ "$(awk 'END { print NR }' \
+      "${K3S_CREDENTIAL_UPLOAD_TOKEN_FILE}")" != "1" \
+      || ${#delivery_token} -lt 32 || ${#delivery_token} -gt 4096 \
+      || ! "${delivery_token}" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
+    fail "The Broker credential upload token must be one JWT line of 32 to 4096 characters."
+  fi
+  cat > "${WORK_DIR}/broker-curl.conf" <<EOF
+request = "POST"
+header = "Accept: application/json"
+header = "Content-Type: application/json"
+header = "Authorization: Bearer ${delivery_token}"
+EOF
+  chmod 0600 "${WORK_DIR}/broker-curl.conf"
+  unset delivery_token
+
+  local http_status
+  if ! http_status="$(curl \
+      --silent \
+      --show-error \
+      --connect-timeout 10 \
+      --max-time 60 \
+      --proto '=https' \
+      --tlsv1.2 \
+      --config "${WORK_DIR}/broker-curl.conf" \
+      --data-binary "@${request_file}" \
+      --output "${WORK_DIR}/broker-response.json" \
+      --write-out '%{http_code}' \
+      "${K3S_CREDENTIAL_UPLOAD_URL}")"; then
+    fail "The Bootstrap could not reach the Broker credential upload API."
+  fi
+  if [[ "${http_status}" != "200" && "${http_status}" != "201" ]]; then
+    fail "Broker k3s credential upload failed with HTTP ${http_status}."
+  fi
+
+  rm -rf -- "${WORK_DIR}"
+  WORK_DIR=""
+  log "The Broker stored the k3s administrator kubeconfig."
+}
+
+ensure_agent_identity() {
+  if ! getent group 10001 >/dev/null; then
+    if getent group msg-broker-node-agent >/dev/null; then
+      fail "The msg-broker-node-agent group exists with an unexpected GID."
+    fi
+    groupadd --gid 10001 msg-broker-node-agent
+  fi
+  if ! getent passwd 10001 >/dev/null; then
+    if getent passwd msg-broker-node-agent >/dev/null; then
+      fail "The msg-broker-node-agent user exists with an unexpected UID."
+    fi
+    useradd \
+      --uid 10001 \
+      --gid 10001 \
+      --home-dir /nonexistent \
+      --shell /usr/sbin/nologin \
+      msg-broker-node-agent
+  fi
+  install -d -o root -g 10001 -m 0750 "${TLS_DIR}"
+}
+
+certificate_common_name() {
+  openssl x509 \
+    -in "${TLS_DIR}/client.crt" \
+    -noout \
+    -subject \
+    -nameopt RFC2253 2>/dev/null |
+    sed 's/^subject=//'
+}
+
+certificate_is_usable() {
+  local check_seconds="$1"
+  local filename
+  for filename in client.crt client.key client-ca.crt resource_target_id; do
+    if [[ ! -s "${TLS_DIR}/${filename}" ]]; then
+      return 1
+    fi
+  done
+  if [[ "$(tr -d '\r\n' < "${TLS_DIR}/resource_target_id")" != "${RESOURCE_TARGET_ID}" ]]; then
+    return 1
+  fi
+  if [[ "$(certificate_common_name)" != "CN=${RESOURCE_TARGET_ID}" ]]; then
+    return 1
+  fi
+  if ! openssl x509 \
+      -in "${TLS_DIR}/client.crt" \
+      -checkend "${check_seconds}" \
+      -noout >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! cmp -s \
+      <(openssl pkey -in "${TLS_DIR}/client.key" -pubout 2>/dev/null) \
+      <(openssl x509 -in "${TLS_DIR}/client.crt" -pubkey -noout 2>/dev/null); then
+    return 1
+  fi
+  openssl verify \
+    -CAfile "${TLS_DIR}/client-ca.crt" \
+    -purpose sslclient \
+    "${TLS_DIR}/client.crt" >/dev/null 2>&1
+}
+
+enroll_certificate() {
+  require_https_url "MSG_BROKER_ENROLLMENT_URL" "${ENROLLMENT_URL}"
+
+  local enrollment_token=""
+  local aws_identity_signature=""
+  case "${ENROLLMENT_MODE}" in
+    token)
+      if [[ -z "${ENROLLMENT_TOKEN_FILE}" \
+          || ! -f "${ENROLLMENT_TOKEN_FILE}" \
+          || ! -r "${ENROLLMENT_TOKEN_FILE}" ]]; then
+        fail "A readable MSG_BROKER_ENROLLMENT_TOKEN_FILE is required to enroll a certificate."
+      fi
+      enrollment_token="$(tr -d '\r\n' < "${ENROLLMENT_TOKEN_FILE}")"
+      if [[ ! "${enrollment_token}" =~ ^mbe_[A-Za-z0-9_-]{40,252}$ ]]; then
+        fail "The enrollment token file does not contain a valid token."
+      fi
+      ;;
+    gcp-identity)
+      require_https_url "MSG_BROKER_ENROLLMENT_AUDIENCE" "${ENROLLMENT_AUDIENCE}"
+      enrollment_token="$(curl \
+        --fail \
+        --silent \
+        --show-error \
+        --get \
+        --header 'Metadata-Flavor: Google' \
+        --data-urlencode "audience=${ENROLLMENT_AUDIENCE}" \
+        --data-urlencode 'format=full' \
+        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity')"
+      if [[ -z "${enrollment_token}" ]]; then
+        fail "GCP metadata did not return an instance identity token."
+      fi
+      ;;
+    aws-instance-identity)
+      local imds_token
+      WORK_DIR="$(mktemp -d)"
+      chmod 0700 "${WORK_DIR}"
+      imds_token="$(curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        --request PUT \
+        --header 'X-aws-ec2-metadata-token-ttl-seconds: 300' \
+        'http://169.254.169.254/latest/api/token')"
+      curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        --header "X-aws-ec2-metadata-token: ${imds_token}" \
+        'http://169.254.169.254/latest/dynamic/instance-identity/document' \
+        --output "${WORK_DIR}/aws-instance-identity-document"
+      aws_identity_signature="$(
+        curl \
+          --fail \
+          --silent \
+          --show-error \
+          --max-time 5 \
+          --header "X-aws-ec2-metadata-token: ${imds_token}" \
+          'http://169.254.169.254/latest/dynamic/instance-identity/signature' \
+          | tr -d '\r\n'
+      )"
+      unset imds_token
+      if [[ ! -s "${WORK_DIR}/aws-instance-identity-document" \
+          || -z "${aws_identity_signature}" ]]; then
+        fail "EC2 metadata did not return a signed instance identity document."
+      fi
+      ;;
+    azure-attested-identity)
+      if [[ ! "${AZURE_ATTESTATION_NONCE}" =~ ^[0-9]{10}$ ]]; then
+        fail "A 10-digit MSG_BROKER_AZURE_ATTESTATION_NONCE is required for Azure enrollment."
+      fi
+      WORK_DIR="$(mktemp -d)"
+      chmod 0700 "${WORK_DIR}"
+      curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        --noproxy '*' \
+        --header 'Metadata: true' \
+        --get \
+        --data-urlencode 'api-version=2025-04-07' \
+        --data-urlencode "nonce=${AZURE_ATTESTATION_NONCE}" \
+        'http://169.254.169.254/metadata/attested/document' \
+        --output "${WORK_DIR}/azure-attested-document.json"
+      if [[ "$(jq -r '.encoding // empty' \
+          "${WORK_DIR}/azure-attested-document.json")" != "pkcs7" \
+          || -z "$(jq -r '.signature // empty' \
+          "${WORK_DIR}/azure-attested-document.json")" ]]; then
+        fail "Azure IMDS did not return a signed attested identity document."
+      fi
+      ;;
+    *)
+      fail "MSG_BROKER_ENROLLMENT_MODE must be token, gcp-identity, aws-instance-identity, or azure-attested-identity."
+      ;;
+  esac
+
+  if [[ -z "${WORK_DIR}" ]]; then
+    WORK_DIR="$(mktemp -d)"
+  fi
+  chmod 0700 "${WORK_DIR}"
+  openssl genpkey \
+    -algorithm EC \
+    -pkeyopt ec_paramgen_curve:P-256 \
+    -out "${WORK_DIR}/client.key"
+  openssl req \
+    -new \
+    -sha256 \
+    -key "${WORK_DIR}/client.key" \
+    -subj "/CN=${RESOURCE_TARGET_ID}" \
+    -out "${WORK_DIR}/client.csr"
+
+  if [[ "${ENROLLMENT_MODE}" == "aws-instance-identity" ]]; then
+    jq -n \
+      --arg resource_target_id "${RESOURCE_TARGET_ID}" \
+      --rawfile csr "${WORK_DIR}/client.csr" \
+      --rawfile aws_document "${WORK_DIR}/aws-instance-identity-document" \
+      --arg aws_signature "${aws_identity_signature}" \
+      '{
+        resource_target_id: $resource_target_id,
+        certificate_signing_request_pem: $csr,
+        aws_instance_identity_document: $aws_document,
+        aws_instance_identity_signature: $aws_signature
+      }' > "${WORK_DIR}/request.json"
+  elif [[ "${ENROLLMENT_MODE}" == "azure-attested-identity" ]]; then
+    jq -n \
+      --arg resource_target_id "${RESOURCE_TARGET_ID}" \
+      --rawfile csr "${WORK_DIR}/client.csr" \
+      --rawfile azure_document "${WORK_DIR}/azure-attested-document.json" \
+      '{
+        resource_target_id: $resource_target_id,
+        certificate_signing_request_pem: $csr,
+        azure_attested_document: $azure_document
+      }' > "${WORK_DIR}/request.json"
+  else
+    jq -n \
+      --arg resource_target_id "${RESOURCE_TARGET_ID}" \
+      --rawfile csr "${WORK_DIR}/client.csr" \
+      '{
+        resource_target_id: $resource_target_id,
+        certificate_signing_request_pem: $csr
+      }' > "${WORK_DIR}/request.json"
+  fi
+  cat > "${WORK_DIR}/curl.conf" <<EOF
+request = "POST"
+header = "Accept: application/json"
+header = "Content-Type: application/json"
+EOF
+  if [[ -n "${enrollment_token}" ]]; then
+    printf 'header = "Authorization: Bearer %s"\n' "${enrollment_token}" \
+      >> "${WORK_DIR}/curl.conf"
+  fi
+  chmod 0600 "${WORK_DIR}/curl.conf" "${WORK_DIR}/request.json"
+  unset enrollment_token aws_identity_signature
+
+  local http_status
+  http_status="$(curl \
+    --silent \
+    --show-error \
+    --proto '=https' \
+    --tlsv1.2 \
+    --config "${WORK_DIR}/curl.conf" \
+    --data-binary "@${WORK_DIR}/request.json" \
+    --output "${WORK_DIR}/response.json" \
+    --write-out '%{http_code}' \
+    "${ENROLLMENT_URL}")"
+  if [[ "${http_status}" != "200" ]]; then
+    local error_code
+    error_code="$(jq -r '.error.code // "ENROLLMENT_REQUEST_FAILED"' \
+      "${WORK_DIR}/response.json" 2>/dev/null || true)"
+    fail "Certificate enrollment failed with HTTP ${http_status} (${error_code})."
+  fi
+
+  if [[ "$(jq -r '.resource_target_id // empty' "${WORK_DIR}/response.json")" != "${RESOURCE_TARGET_ID}" ]]; then
+    fail "The enrollment response resource_target_id did not match."
+  fi
+  jq -er '.client_certificate_pem' \
+    "${WORK_DIR}/response.json" > "${WORK_DIR}/client.crt"
+  jq -er '.client_ca_pem' \
+    "${WORK_DIR}/response.json" > "${WORK_DIR}/client-ca.crt"
+
+  if [[ "$(openssl x509 \
+      -in "${WORK_DIR}/client.crt" \
+      -noout \
+      -subject \
+      -nameopt RFC2253 | sed 's/^subject=//')" != "CN=${RESOURCE_TARGET_ID}" ]]; then
+    fail "The issued certificate identity did not match."
+  fi
+  openssl verify \
+    -CAfile "${WORK_DIR}/client-ca.crt" \
+    -purpose sslclient \
+    "${WORK_DIR}/client.crt" >/dev/null
+  if ! cmp -s \
+      <(openssl pkey -in "${WORK_DIR}/client.key" -pubout) \
+      <(openssl x509 -in "${WORK_DIR}/client.crt" -pubkey -noout); then
+    fail "The issued certificate did not match the VM-local private key."
+  fi
+
+  install -o root -g 10001 -m 0640 \
+    "${WORK_DIR}/client.crt" \
+    "${TLS_DIR}/client.crt"
+  install -o 10001 -g 10001 -m 0600 \
+    "${WORK_DIR}/client.key" \
+    "${TLS_DIR}/client.key"
+  install -o root -g root -m 0644 \
+    "${WORK_DIR}/client-ca.crt" \
+    "${TLS_DIR}/client-ca.crt"
+  printf '%s\n' "${RESOURCE_TARGET_ID}" > "${TLS_DIR}/resource_target_id"
+  chown root:root "${TLS_DIR}/resource_target_id"
+  chmod 0644 "${TLS_DIR}/resource_target_id"
+
+  rm -rf -- "${WORK_DIR}"
+  WORK_DIR=""
+  log "A VM-local key and Agent certificate were enrolled."
+}
+
+single_node_name() {
+  local nodes
+  nodes="$(k3s kubectl get nodes -o jsonpath='{.items[*].metadata.name}')"
+  # Intentionally split the Kubernetes node names on spaces.
+  # shellcheck disable=SC2206
+  local node_names=(${nodes})
+  if [[ ${#node_names[@]} -ne 1 ]]; then
+    fail "This Bootstrap version requires exactly one k3s node per VM."
+  fi
+  printf '%s' "${node_names[0]}"
+}
+
+render_daemonset() {
+  local output_file="$1"
+  local base_file="${MANIFEST_DIR}/daemonset.yaml"
+  if [[ ! -s "${base_file}" ]]; then
+    fail "Missing DaemonSet manifest: ${base_file}"
+  fi
+
+  local image_file
+  image_file="$(mktemp)"
+  k3s kubectl set image \
+    --local \
+    -f "${base_file}" \
+    node-agent="${AGENT_IMAGE}" \
+    -o yaml > "${image_file}"
+  k3s kubectl set env \
+    --local \
+    -f "${image_file}" \
+    --containers=node-agent \
+    AGENT_DRY_RUN=false \
+    BROKER_OBSERVATIONS_URL="${OBSERVATIONS_URL}" \
+    -o yaml > "${output_file}"
+  rm -f -- "${image_file}"
+}
+
+wait_for_delivery() {
+  if [[ "${VERIFY_DELIVERY}" != "true" ]]; then
+    log "Central delivery verification was explicitly disabled."
+    return
+  fi
+
+  local elapsed=0
+  while (( elapsed < DELIVERY_TIMEOUT_SECONDS )); do
+    if k3s kubectl \
+        -n msg-broker-system \
+        logs daemonset/msg-broker-node-agent \
+        --since=3m \
+        --tail=200 2>/dev/null |
+        grep -Fq "Delivered observation"; then
+      log "The Node Agent delivered an observation to the Broker."
+      return
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+  fail "No successful Agent observation was seen within ${DELIVERY_TIMEOUT_SECONDS} seconds."
+}
+
+write_state() {
+  install -d -o root -g root -m 0700 "${STATE_DIR}"
+  local temporary_state
+  temporary_state="$(mktemp "${STATE_DIR}/node-agent.state.XXXXXX")"
+  cat > "${temporary_state}" <<EOF
+RESOURCE_TARGET_ID=${RESOURCE_TARGET_ID}
+K3S_VERSION=${K3S_VERSION}
+AGENT_IMAGE=${AGENT_IMAGE}
+OBSERVATIONS_URL=${OBSERVATIONS_URL}
+CERTIFICATE_SERIAL=$(openssl x509 -in "${TLS_DIR}/client.crt" -noout -serial | sed 's/^serial=//')
+CERTIFICATE_NOT_AFTER=$(openssl x509 -in "${TLS_DIR}/client.crt" -noout -enddate | sed 's/^notAfter=//')
+LAST_RECONCILED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+K3S_CREDENTIAL_FINGERPRINT=${K3S_CREDENTIAL_FINGERPRINT}
+K3S_CREDENTIAL_NOT_AFTER=${K3S_CREDENTIAL_NOT_AFTER}
+EOF
+  chown root:root "${temporary_state}"
+  chmod 0600 "${temporary_state}"
+  mv -f -- "${temporary_state}" "${STATE_FILE}"
+}
+
+reconcile() {
+  validate_resource_target_id
+  validate_desired_versions
+  validate_non_negative_integer \
+    "MSG_BROKER_CERT_RENEW_BEFORE_SECONDS" \
+    "${RENEW_BEFORE_SECONDS}"
+  validate_non_negative_integer \
+    "MSG_BROKER_DELIVERY_TIMEOUT_SECONDS" \
+    "${DELIVERY_TIMEOUT_SECONDS}"
+  require_https_url "MSG_BROKER_OBSERVATIONS_URL" "${OBSERVATIONS_URL}"
+  if [[ "${VERIFY_DELIVERY}" != "true" && "${VERIFY_DELIVERY}" != "false" ]]; then
+    fail "MSG_BROKER_VERIFY_DELIVERY must be true or false."
+  fi
+  if [[ ! -s "${MANIFEST_DIR}/rbac.yaml" ]]; then
+    fail "Missing RBAC manifest: ${MANIFEST_DIR}/rbac.yaml"
+  fi
+
+  validate_k3s_credential_upload_preflight
+  install_dependencies
+  install_or_update_k3s
+  ensure_agent_identity
+
+  local certificate_changed=false
+  if certificate_is_usable "${RENEW_BEFORE_SECONDS}"; then
+    log "The installed Agent certificate is valid beyond the renewal window."
+  else
+    enroll_certificate
+    certificate_changed=true
+  fi
+
+  local node_name
+  node_name="$(single_node_name)"
+  k3s kubectl annotate node "${node_name}" \
+    "msg-broker.io/resource-target-id=${RESOURCE_TARGET_ID}" \
+    --overwrite
+
+  WORK_DIR="$(mktemp -d)"
+  render_daemonset "${WORK_DIR}/daemonset.yaml"
+  k3s kubectl apply -f "${MANIFEST_DIR}/rbac.yaml"
+  k3s kubectl apply -f "${WORK_DIR}/daemonset.yaml"
+  if [[ "${certificate_changed}" == "true" ]]; then
+    k3s kubectl \
+      -n msg-broker-system \
+      rollout restart daemonset/msg-broker-node-agent
+  fi
+  k3s kubectl \
+    -n msg-broker-system \
+    rollout status daemonset/msg-broker-node-agent \
+    --timeout=180s
+
+  local applied_image
+  applied_image="$(k3s kubectl \
+    -n msg-broker-system \
+    get daemonset msg-broker-node-agent \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="node-agent")].image}')"
+  if [[ "${applied_image}" != "${AGENT_IMAGE}" ]]; then
+    fail "The applied DaemonSet image did not match the requested digest."
+  fi
+
+  rm -rf -- "${WORK_DIR}"
+  WORK_DIR=""
+  wait_for_delivery
+  upload_k3s_credential
+  write_state
+  log "BOOTSTRAP_STATUS=ready"
+}
+
+upload_existing_k3s_credential() {
+  load_state_defaults
+  validate_resource_target_id
+  if ! k3s_credential_upload_is_configured; then
+    fail "MSG_BROKER_K3S_CREDENTIAL_UPLOAD_URL is required for upload-k3s-credential."
+  fi
+  command -v base64 >/dev/null 2>&1 \
+    || fail "The base64 executable is required."
+  command -v curl >/dev/null 2>&1 \
+    || fail "The curl executable is required."
+  command -v openssl >/dev/null 2>&1 \
+    || fail "The OpenSSL executable is required."
+  validate_k3s_credential_upload_configuration
+  upload_k3s_credential
+  log "BOOTSTRAP_STATUS=k3s-credential-uploaded"
+}
+
+check_installation() {
+  load_state_defaults
+  validate_resource_target_id
+  validate_desired_versions
+  command -v k3s >/dev/null 2>&1 || fail "k3s is not installed."
+  command -v openssl >/dev/null 2>&1 || fail "OpenSSL is not installed."
+  systemctl is-active --quiet k3s || fail "The k3s service is not active."
+  if [[ "$(current_k3s_version)" != "${K3S_VERSION}" ]]; then
+    fail "The installed k3s version does not match Bootstrap state."
+  fi
+  certificate_is_usable 0 || fail "The Agent certificate is missing or invalid."
+
+  local node_name annotation applied_image
+  node_name="$(single_node_name)"
+  annotation="$(k3s kubectl get node "${node_name}" \
+    -o jsonpath='{.metadata.annotations.msg-broker\.io/resource-target-id}')"
+  if [[ "${annotation}" != "${RESOURCE_TARGET_ID}" ]]; then
+    fail "The Kubernetes Node annotation does not match the resource target."
+  fi
+  k3s kubectl \
+    -n msg-broker-system \
+    rollout status daemonset/msg-broker-node-agent \
+    --timeout=30s >/dev/null
+  applied_image="$(k3s kubectl \
+    -n msg-broker-system \
+    get daemonset msg-broker-node-agent \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="node-agent")].image}')"
+  if [[ "${applied_image}" != "${AGENT_IMAGE}" ]]; then
+    fail "The DaemonSet image does not match Bootstrap state."
+  fi
+  if ! k3s kubectl \
+      -n msg-broker-system \
+      logs daemonset/msg-broker-node-agent \
+      --since=10m \
+      --tail=300 2>/dev/null |
+      grep -Fq "Delivered observation"; then
+    fail "No successful Agent delivery was found in the last 10 minutes."
+  fi
+  log "BOOTSTRAP_STATUS=ready"
+  log "RESOURCE_TARGET_ID=${RESOURCE_TARGET_ID}"
+  log "K3S_VERSION=${K3S_VERSION}"
+  log "AGENT_IMAGE=${AGENT_IMAGE}"
+}
+
+remove_agent() {
+  load_state_defaults
+  local certificate_serial="unknown"
+  if [[ -s "${TLS_DIR}/client.crt" ]]; then
+    certificate_serial="$(openssl x509 \
+      -in "${TLS_DIR}/client.crt" \
+      -noout \
+      -serial 2>/dev/null | sed 's/^serial=//' || true)"
+  fi
+
+  if command -v k3s >/dev/null 2>&1; then
+    k3s kubectl \
+      -n msg-broker-system \
+      delete daemonset msg-broker-node-agent \
+      --ignore-not-found
+    k3s kubectl delete clusterrolebinding msg-broker-node-agent \
+      --ignore-not-found
+    k3s kubectl delete clusterrole msg-broker-node-agent \
+      --ignore-not-found
+    k3s kubectl delete namespace msg-broker-system \
+      --ignore-not-found \
+      --wait=true \
+      --timeout=60s
+  fi
+
+  rm -f -- \
+    "${TLS_DIR}/client.crt" \
+    "${TLS_DIR}/client.key" \
+    "${TLS_DIR}/client-ca.crt" \
+    "${TLS_DIR}/resource_target_id"
+  rm -f -- "${STATE_FILE}"
+  log "The Node Agent and its local certificate were removed. k3s was preserved."
+  log "CENTRAL_CERTIFICATE_REVOCATION_REQUIRED resource_target_id=${RESOURCE_TARGET_ID:-unknown} serial=${certificate_serial}"
+  log "BOOTSTRAP_STATUS=removed"
+}
+
+case "${ACTION}" in
+  install | update)
+    require_root
+    validate_platform
+    reconcile
+    ;;
+  upload-k3s-credential)
+    validate_platform
+    upload_existing_k3s_credential
+    ;;
+  check)
+    require_root
+    validate_platform
+    check_installation
+    ;;
+  remove)
+    require_root
+    validate_platform
+    remove_agent
+    ;;
+  -h | --help | help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

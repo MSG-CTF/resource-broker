@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  MSG Broker Google OIDC federation Hub Role. The Hub can assume fixed-name
+  inventory and bootstrap roles in independently owned AWS accounts. Each
+  target role must separately trust this Hub and require its Broker-issued
+  External ID.
+
+Parameters:
+  HubRoleName:
+    Type: String
+    Default: MsgBrokerFederationHubRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
+  SpokeRoleName:
+    Type: String
+    Default: MsgBrokerInventoryRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
+  BootstrapRoleName:
+    Type: String
+    Default: MsgBrokerBootstrapRole
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,64}$"
+  GoogleAudience:
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    NoEcho: false
+    Description: The aud claim requested from the GCP metadata identity endpoint.
+  GoogleAuthorizedParty:
+    Type: String
+    AllowedPattern: "^[0-9]{10,32}$"
+    NoEcho: false
+    Description: The azp claim from the Broker GCP Service Account ID token.
+  GoogleSubject:
+    Type: String
+    AllowedPattern: "^[0-9]{10,32}$"
+    NoEcho: false
+    Description: The sub claim from the Broker GCP Service Account ID token.
+
+Resources:
+  FederationHubRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref HubRoleName
+      Description: Exchanges the Broker GCP identity and assumes target-account roles.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TrustOnlyBrokerGoogleIdentity
+            Effect: Allow
+            Principal:
+              Federated: accounts.google.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "accounts.google.com:aud": !Ref GoogleAuthorizedParty
+                "accounts.google.com:oaud": !Ref GoogleAudience
+                "accounts.google.com:sub": !Ref GoogleSubject
+      Policies:
+        - PolicyName: AssumeMsgBrokerTargetAccountRoles
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AssumeInventoryRoles
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::*:role/${SpokeRoleName}"
+              - Sid: AssumeBootstrapRoles
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::*:role/${BootstrapRoleName}"
+      Tags:
+        - Key: ManagedBy
+          Value: MSG-Broker
+
+Outputs:
+  HubRoleArn:
+    Description: Set this value as AWS_FEDERATION_HUB_ROLE_ARN on the Broker.
+    Value: !GetAtt FederationHubRole.Arn

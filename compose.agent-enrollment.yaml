@@ -1,0 +1,9 @@
+services:
+  app:
+    environment:
+      AGENT_ENROLLMENT_CA_DIR: /etc/msg-broker/pki/agent-ca/enrollment-ca
+      AGENT_ENROLLMENT_CERTIFICATE_DAYS: ${AGENT_ENROLLMENT_CERTIFICATE_DAYS:-75}
+    volumes:
+      - type: bind
+        source: ${AGENT_ENROLLMENT_CA_HOST_DIR:?Set AGENT_ENROLLMENT_CA_HOST_DIR in .env}
+        target: /etc/msg-broker/pki/agent-ca/enrollment-ca

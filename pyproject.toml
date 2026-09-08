@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "msg-resource-broker"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.16,<2",
+    "azure-identity>=1.25,<2",
+    "azure-mgmt-compute>=38.1,<39",
+    "azure-mgmt-network>=30.2,<31",
+    "boto3>=1.40,<2",
+    "cryptography>=46,<48",
+    "fastapi>=0.136,<1",
+    "google-cloud-compute>=1,<2",
+    "google-cloud-os-config>=1.25,<2",
+    "google-auth>=2.40,<3",
+    "requests>=2.32,<3",
+    "psycopg[binary]>=3.2,<4",
+    "PyJWT>=2.12,<3",
+    "pydantic>=2.13,<3",
+    "sqlalchemy>=2.0,<3",
+    "uvicorn[standard]>=0.44,<1",
+]
+
+[project.optional-dependencies]
+test = [
+    "httpx>=0.28,<1",
+    "pytest>=8.4,<9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
