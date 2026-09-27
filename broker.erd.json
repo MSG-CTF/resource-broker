@@ -1,0 +1,1363 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dineug/erd-editor/main/json-schema/schema.json",
+  "version": "3.0.0",
+  "settings": {
+    "width": 2000,
+    "height": 2000,
+    "scrollTop": -500,
+    "scrollLeft": -459.596,
+    "zoomLevel": 1,
+    "show": 511,
+    "database": 16,
+    "databaseName": "msg_broker",
+    "canvasType": "ERD",
+    "language": 16,
+    "tableNameCase": 8,
+    "columnNameCase": 8,
+    "bracketType": 1,
+    "relationshipDataTypeSync": true,
+    "relationshipOptimization": false,
+    "columnOrder": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "maxWidthComment": -1,
+    "ignoreSaveSettings": 0
+  },
+  "doc": {
+    "tableIds": [
+      "t_provider_accounts",
+      "t_resource_targets",
+      "t_runtime_containers"
+    ],
+    "relationshipIds": [
+      "rel_provider_accounts_resource_targets",
+      "rel_resource_targets_runtime_containers"
+    ],
+    "indexIds": [],
+    "memoIds": []
+  },
+  "collections": {
+    "tableEntities": {
+      "t_provider_accounts": {
+        "id": "t_provider_accounts",
+        "name": "provider_accounts",
+        "comment": "Cloud 계정 설정과 verify/sync 상태. UNIQUE(provider, external_account_id). Provider는 AWS/GCP/AZURE.",
+        "columnIds": [
+          "pa_account_id",
+          "pa_provider",
+          "pa_external_account_id",
+          "pa_display_name",
+          "pa_auth_method",
+          "pa_credential_reference",
+          "pa_provider_config",
+          "pa_enabled",
+          "pa_credential_status",
+          "pa_permission_status",
+          "pa_provider_api_status",
+          "pa_last_verified_at",
+          "pa_last_synced_at",
+          "pa_created_at",
+          "pa_updated_at"
+        ],
+        "seqColumnIds": [
+          "pa_account_id",
+          "pa_provider",
+          "pa_external_account_id",
+          "pa_display_name",
+          "pa_auth_method",
+          "pa_credential_reference",
+          "pa_provider_config",
+          "pa_enabled",
+          "pa_credential_status",
+          "pa_permission_status",
+          "pa_provider_api_status",
+          "pa_last_verified_at",
+          "pa_last_synced_at",
+          "pa_created_at",
+          "pa_updated_at"
+        ],
+        "ui": {
+          "x": 58.718,
+          "y": 99.2308,
+          "zIndex": 1,
+          "widthName": 98,
+          "widthComment": 559,
+          "color": "#4F46E5"
+        },
+        "meta": {
+          "updateAt": 1785356067084,
+          "createAt": 1785340800000
+        }
+      },
+      "t_resource_targets": {
+        "id": "t_resource_targets",
+        "name": "resource_targets",
+        "comment": "Provider VM snapshot. UNIQUE(account_id, provider_scope_id, provider_instance_id), UNIQUE(target_id).",
+        "columnIds": [
+          "rt_resource_target_id",
+          "rt_account_id",
+          "rt_provider_instance_id",
+          "rt_provider_scope_id",
+          "rt_instance_name",
+          "rt_provider_instance_state",
+          "rt_provider_machine_type",
+          "rt_private_ip",
+          "rt_public_ip",
+          "rt_region",
+          "rt_zone",
+          "rt_runtime_type",
+          "rt_target_id",
+          "rt_architecture",
+          "rt_provider_capacity_cpu_millicores",
+          "rt_provider_capacity_memory_mib",
+          "rt_provider_capacity_storage_mib",
+          "rt_allocatable_cpu_millicores",
+          "rt_allocatable_memory_mib",
+          "rt_allocatable_ephemeral_storage_mib",
+          "rt_enabled",
+          "rt_ready",
+          "rt_runtime_observed_at",
+          "rt_runtime_last_seen_at",
+          "rt_observed_at",
+          "rt_last_seen_at",
+          "rt_retired_at",
+          "rt_created_at",
+          "rt_updated_at"
+        ],
+        "seqColumnIds": [
+          "rt_resource_target_id",
+          "rt_account_id",
+          "rt_provider_instance_id",
+          "rt_provider_scope_id",
+          "rt_instance_name",
+          "rt_provider_instance_state",
+          "rt_provider_machine_type",
+          "rt_private_ip",
+          "rt_public_ip",
+          "rt_region",
+          "rt_zone",
+          "rt_runtime_type",
+          "rt_target_id",
+          "rt_architecture",
+          "rt_provider_capacity_cpu_millicores",
+          "rt_provider_capacity_memory_mib",
+          "rt_provider_capacity_storage_mib",
+          "rt_allocatable_cpu_millicores",
+          "rt_allocatable_memory_mib",
+          "rt_allocatable_ephemeral_storage_mib",
+          "rt_enabled",
+          "rt_ready",
+          "rt_runtime_observed_at",
+          "rt_runtime_last_seen_at",
+          "rt_observed_at",
+          "rt_last_seen_at",
+          "rt_retired_at",
+          "rt_created_at",
+          "rt_updated_at"
+        ],
+        "ui": {
+          "x": 231.5385,
+          "y": 629.7436,
+          "zIndex": 2,
+          "widthName": 89,
+          "widthComment": 554,
+          "color": "#0284C7"
+        },
+        "meta": {
+          "updateAt": 1785356074366,
+          "createAt": 1785340800000
+        }
+      },
+      "t_runtime_containers": {
+        "id": "t_runtime_containers",
+        "name": "runtime_containers",
+        "comment": "임시 current snapshot 설계. resource_target_id는 VM FK이며 (resource_target_id, container_id)가 복합 PK. history/retire 정책은 추후 확정.",
+        "columnIds": [
+          "rc_resource_target_id",
+          "rc_container_id",
+          "rc_container_name",
+          "rc_pod_name",
+          "rc_namespace",
+          "rc_status",
+          "rc_cpu_usage_millicores",
+          "rc_memory_usage_mib",
+          "rc_storage_usage_mib",
+          "rc_observed_at"
+        ],
+        "seqColumnIds": [
+          "rc_resource_target_id",
+          "rc_container_id",
+          "rc_container_name",
+          "rc_pod_name",
+          "rc_namespace",
+          "rc_status",
+          "rc_cpu_usage_millicores",
+          "rc_memory_usage_mib",
+          "rc_storage_usage_mib",
+          "rc_observed_at"
+        ],
+        "ui": {
+          "x": 1274.6032,
+          "y": 835.873,
+          "zIndex": 3,
+          "widthName": 103,
+          "widthComment": 727,
+          "color": "#059669"
+        },
+        "meta": {
+          "updateAt": 1785356081482,
+          "createAt": 1785340800000
+        }
+      }
+    },
+    "tableColumnEntities": {
+      "pa_account_id": {
+        "id": "pa_account_id",
+        "tableId": "t_provider_accounts",
+        "name": "account_id",
+        "comment": "Broker 내부 계정 UUID",
+        "dataType": "UUID",
+        "default": "",
+        "options": 10,
+        "ui": {
+          "keys": 1,
+          "widthName": 60,
+          "widthComment": 122,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_provider": {
+        "id": "pa_provider",
+        "tableId": "t_provider_accounts",
+        "name": "provider",
+        "comment": "AWS, GCP, AZURE",
+        "dataType": "VARCHAR(5)",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 97,
+          "widthDataType": 68,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_external_account_id": {
+        "id": "pa_external_account_id",
+        "tableId": "t_provider_accounts",
+        "name": "external_account_id",
+        "comment": "Provider 측 계정 또는 tenant identity",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 106,
+          "widthComment": 197,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_display_name": {
+        "id": "pa_display_name",
+        "tableId": "t_provider_accounts",
+        "name": "display_name",
+        "comment": "",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 73,
+          "widthComment": 60,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_auth_method": {
+        "id": "pa_auth_method",
+        "tableId": "t_provider_accounts",
+        "name": "auth_method",
+        "comment": "인증 방식 이름",
+        "dataType": "VARCHAR(64)",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 72,
+          "widthComment": 81,
+          "widthDataType": 75,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_credential_reference": {
+        "id": "pa_credential_reference",
+        "tableId": "t_provider_accounts",
+        "name": "credential_reference",
+        "comment": "비밀이 아닌 credential 참조",
+        "dataType": "VARCHAR(1024)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 109,
+          "widthComment": 148,
+          "widthDataType": 87,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_provider_config": {
+        "id": "pa_provider_config",
+        "tableId": "t_provider_accounts",
+        "name": "provider_config",
+        "comment": "비밀이 아닌 Provider 설정",
+        "dataType": "JSONB",
+        "default": "'{}'::jsonb",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 85,
+          "widthComment": 140,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_enabled": {
+        "id": "pa_enabled",
+        "tableId": "t_provider_accounts",
+        "name": "enabled",
+        "comment": "",
+        "dataType": "BOOLEAN",
+        "default": "true",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 60,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_credential_status": {
+        "id": "pa_credential_status",
+        "tableId": "t_provider_accounts",
+        "name": "credential_status",
+        "comment": "VALID, INVALID, UNKNOWN",
+        "dataType": "VARCHAR(7)",
+        "default": "UNKNOWN",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 90,
+          "widthComment": 152,
+          "widthDataType": 68,
+          "widthDefault": 64
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_permission_status": {
+        "id": "pa_permission_status",
+        "tableId": "t_provider_accounts",
+        "name": "permission_status",
+        "comment": "SUFFICIENT, INSUFFICIENT, UNKNOWN",
+        "dataType": "VARCHAR(12)",
+        "default": "UNKNOWN",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 96,
+          "widthComment": 211,
+          "widthDataType": 75,
+          "widthDefault": 64
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_provider_api_status": {
+        "id": "pa_provider_api_status",
+        "tableId": "t_provider_accounts",
+        "name": "provider_api_status",
+        "comment": "AVAILABLE, UNAVAILABLE, UNKNOWN",
+        "dataType": "VARCHAR(11)",
+        "default": "UNKNOWN",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 104,
+          "widthComment": 207,
+          "widthDataType": 75,
+          "widthDefault": 64
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_last_verified_at": {
+        "id": "pa_last_verified_at",
+        "tableId": "t_provider_accounts",
+        "name": "last_verified_at",
+        "comment": "",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 79,
+          "widthComment": 60,
+          "widthDataType": 162,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_last_synced_at": {
+        "id": "pa_last_synced_at",
+        "tableId": "t_provider_accounts",
+        "name": "last_synced_at",
+        "comment": "",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 77,
+          "widthComment": 60,
+          "widthDataType": 162,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_created_at": {
+        "id": "pa_created_at",
+        "tableId": "t_provider_accounts",
+        "name": "created_at",
+        "comment": "",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "CURRENT_TIMESTAMP",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 60,
+          "widthDataType": 162,
+          "widthDefault": 122
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "pa_updated_at": {
+        "id": "pa_updated_at",
+        "tableId": "t_provider_accounts",
+        "name": "updated_at",
+        "comment": "",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "CURRENT_TIMESTAMP",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 62,
+          "widthComment": 60,
+          "widthDataType": 162,
+          "widthDefault": 122
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_resource_target_id": {
+        "id": "rt_resource_target_id",
+        "tableId": "t_resource_targets",
+        "name": "resource_target_id",
+        "comment": "Broker 내부 VM UUID",
+        "dataType": "UUID",
+        "default": "",
+        "options": 10,
+        "ui": {
+          "keys": 1,
+          "widthName": 99,
+          "widthComment": 117,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_account_id": {
+        "id": "rt_account_id",
+        "tableId": "t_resource_targets",
+        "name": "account_id",
+        "comment": "provider_accounts.account_id",
+        "dataType": "UUID",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 2,
+          "widthName": 60,
+          "widthComment": 158,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_provider_instance_id": {
+        "id": "rt_provider_instance_id",
+        "tableId": "t_resource_targets",
+        "name": "provider_instance_id",
+        "comment": "Provider VM 고유 ID",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 110,
+          "widthComment": 110,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_provider_scope_id": {
+        "id": "rt_provider_scope_id",
+        "tableId": "t_resource_targets",
+        "name": "provider_scope_id",
+        "comment": "GCP Project ID / Azure Subscription ID / AWS TBD",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 97,
+          "widthComment": 266,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_instance_name": {
+        "id": "rt_instance_name",
+        "tableId": "t_resource_targets",
+        "name": "instance_name",
+        "comment": "",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 80,
+          "widthComment": 60,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_provider_instance_state": {
+        "id": "rt_provider_instance_state",
+        "tableId": "t_resource_targets",
+        "name": "provider_instance_state",
+        "comment": "Cloud VM 상태",
+        "dataType": "VARCHAR(64)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 126,
+          "widthComment": 82,
+          "widthDataType": 75,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_provider_machine_type": {
+        "id": "rt_provider_machine_type",
+        "tableId": "t_resource_targets",
+        "name": "provider_machine_type",
+        "comment": "",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 124,
+          "widthComment": 60,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_private_ip": {
+        "id": "rt_private_ip",
+        "tableId": "t_resource_targets",
+        "name": "private_ip",
+        "comment": "",
+        "dataType": "VARCHAR(64)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 60,
+          "widthDataType": 75,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_public_ip": {
+        "id": "rt_public_ip",
+        "tableId": "t_resource_targets",
+        "name": "public_ip",
+        "comment": "",
+        "dataType": "VARCHAR(64)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 60,
+          "widthDataType": 75,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_region": {
+        "id": "rt_region",
+        "tableId": "t_resource_targets",
+        "name": "region",
+        "comment": "",
+        "dataType": "VARCHAR(64)",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 60,
+          "widthDataType": 75,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_zone": {
+        "id": "rt_zone",
+        "tableId": "t_resource_targets",
+        "name": "zone",
+        "comment": "",
+        "dataType": "VARCHAR(128)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 60,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_runtime_type": {
+        "id": "rt_runtime_type",
+        "tableId": "t_resource_targets",
+        "name": "runtime_type",
+        "comment": "KUBERNETES",
+        "dataType": "VARCHAR(10)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 72,
+          "widthComment": 71,
+          "widthDataType": 75,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_target_id": {
+        "id": "rt_target_id",
+        "tableId": "t_resource_targets",
+        "name": "target_id",
+        "comment": "Runtime target ID",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 4,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 96,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_architecture": {
+        "id": "rt_architecture",
+        "tableId": "t_resource_targets",
+        "name": "architecture",
+        "comment": "AMD64, ARM64",
+        "dataType": "VARCHAR(5)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 65,
+          "widthComment": 86,
+          "widthDataType": 68,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_provider_capacity_cpu_millicores": {
+        "id": "rt_provider_capacity_cpu_millicores",
+        "tableId": "t_resource_targets",
+        "name": "provider_capacity_cpu_millicores",
+        "comment": "Cloud 전체 CPU",
+        "dataType": "INTEGER",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 174,
+          "widthComment": 86,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_provider_capacity_memory_mib": {
+        "id": "rt_provider_capacity_memory_mib",
+        "tableId": "t_resource_targets",
+        "name": "provider_capacity_memory_mib",
+        "comment": "Cloud 전체 Memory",
+        "dataType": "INTEGER",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 169,
+          "widthComment": 108,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_provider_capacity_storage_mib": {
+        "id": "rt_provider_capacity_storage_mib",
+        "tableId": "t_resource_targets",
+        "name": "provider_capacity_storage_mib",
+        "comment": "Cloud 전체 Storage",
+        "dataType": "INTEGER",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 165,
+          "widthComment": 105,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_allocatable_cpu_millicores": {
+        "id": "rt_allocatable_cpu_millicores",
+        "tableId": "t_resource_targets",
+        "name": "allocatable_cpu_millicores",
+        "comment": "Broker 배치 판단 CPU",
+        "dataType": "INTEGER",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 138,
+          "widthComment": 117,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_allocatable_memory_mib": {
+        "id": "rt_allocatable_memory_mib",
+        "tableId": "t_resource_targets",
+        "name": "allocatable_memory_mib",
+        "comment": "Broker 배치 판단 Memory",
+        "dataType": "INTEGER",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 133,
+          "widthComment": 139,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_allocatable_ephemeral_storage_mib": {
+        "id": "rt_allocatable_ephemeral_storage_mib",
+        "tableId": "t_resource_targets",
+        "name": "allocatable_ephemeral_storage_mib",
+        "comment": "Broker 배치 판단 Storage",
+        "dataType": "INTEGER",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 190,
+          "widthComment": 135,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_enabled": {
+        "id": "rt_enabled",
+        "tableId": "t_resource_targets",
+        "name": "enabled",
+        "comment": "",
+        "dataType": "BOOLEAN",
+        "default": "false",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 60,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_ready": {
+        "id": "rt_ready",
+        "tableId": "t_resource_targets",
+        "name": "ready",
+        "comment": "Runtime readiness",
+        "dataType": "BOOLEAN",
+        "default": "false",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 99,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_runtime_observed_at": {
+        "id": "rt_runtime_observed_at",
+        "tableId": "t_resource_targets",
+        "name": "runtime_observed_at",
+        "comment": "Node Agent가 관측한 시각",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 117,
+          "widthComment": 139,
+          "widthDataType": 162,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_runtime_last_seen_at": {
+        "id": "rt_runtime_last_seen_at",
+        "tableId": "t_resource_targets",
+        "name": "runtime_last_seen_at",
+        "comment": "Broker가 마지막 Agent 요청을 수신한 시각",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 116,
+          "widthComment": 235,
+          "widthDataType": 162,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_observed_at": {
+        "id": "rt_observed_at",
+        "tableId": "t_resource_targets",
+        "name": "observed_at",
+        "comment": "Provider 관측 시각",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 66,
+          "widthComment": 101,
+          "widthDataType": 162,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_last_seen_at": {
+        "id": "rt_last_seen_at",
+        "tableId": "t_resource_targets",
+        "name": "last_seen_at",
+        "comment": "",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 65,
+          "widthComment": 60,
+          "widthDataType": 162,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_retired_at": {
+        "id": "rt_retired_at",
+        "tableId": "t_resource_targets",
+        "name": "retired_at",
+        "comment": "",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 60,
+          "widthDataType": 162,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_created_at": {
+        "id": "rt_created_at",
+        "tableId": "t_resource_targets",
+        "name": "created_at",
+        "comment": "",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "CURRENT_TIMESTAMP",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 60,
+          "widthDataType": 162,
+          "widthDefault": 122
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rt_updated_at": {
+        "id": "rt_updated_at",
+        "tableId": "t_resource_targets",
+        "name": "updated_at",
+        "comment": "",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "CURRENT_TIMESTAMP",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 62,
+          "widthComment": 60,
+          "widthDataType": 162,
+          "widthDefault": 122
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_resource_target_id": {
+        "id": "rc_resource_target_id",
+        "tableId": "t_runtime_containers",
+        "name": "resource_target_id",
+        "comment": "VM FK; 사용자가 말한 vm_id",
+        "dataType": "UUID",
+        "default": "",
+        "options": 10,
+        "ui": {
+          "keys": 3,
+          "widthName": 99,
+          "widthComment": 152,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_container_id": {
+        "id": "rc_container_id",
+        "tableId": "t_runtime_containers",
+        "name": "container_id",
+        "comment": "containerd/CRI container ID",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 10,
+        "ui": {
+          "keys": 1,
+          "widthName": 67,
+          "widthComment": 149,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_container_name": {
+        "id": "rc_container_name",
+        "tableId": "t_runtime_containers",
+        "name": "container_name",
+        "comment": "",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 86,
+          "widthComment": 60,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_pod_name": {
+        "id": "rc_pod_name",
+        "tableId": "t_runtime_containers",
+        "name": "pod_name",
+        "comment": "k3s pod 이름; 매핑 불가 시 NULL",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 176,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_namespace": {
+        "id": "rc_namespace",
+        "tableId": "t_runtime_containers",
+        "name": "namespace",
+        "comment": "k3s namespace; 매핑 불가 시 NULL",
+        "dataType": "VARCHAR(255)",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 62,
+          "widthComment": 187,
+          "widthDataType": 81,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_status": {
+        "id": "rc_status",
+        "tableId": "t_runtime_containers",
+        "name": "status",
+        "comment": "Runtime container 상태",
+        "dataType": "VARCHAR(64)",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 60,
+          "widthComment": 127,
+          "widthDataType": 75,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_cpu_usage_millicores": {
+        "id": "rc_cpu_usage_millicores",
+        "tableId": "t_runtime_containers",
+        "name": "cpu_usage_millicores",
+        "comment": "수집 실패 시 NULL",
+        "dataType": "INTEGER",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 113,
+          "widthComment": 100,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_memory_usage_mib": {
+        "id": "rc_memory_usage_mib",
+        "tableId": "t_runtime_containers",
+        "name": "memory_usage_mib",
+        "comment": "수집 실패 시 NULL",
+        "dataType": "INTEGER",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 108,
+          "widthComment": 100,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_storage_usage_mib": {
+        "id": "rc_storage_usage_mib",
+        "tableId": "t_runtime_containers",
+        "name": "storage_usage_mib",
+        "comment": "임시 필드; 정의/수집 실패 시 NULL",
+        "dataType": "INTEGER",
+        "default": "",
+        "options": 0,
+        "ui": {
+          "keys": 0,
+          "widthName": 103,
+          "widthComment": 186,
+          "widthDataType": 60,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rc_observed_at": {
+        "id": "rc_observed_at",
+        "tableId": "t_runtime_containers",
+        "name": "observed_at",
+        "comment": "Node Agent 관측 시각",
+        "dataType": "TIMESTAMP WITH TIME ZONE",
+        "default": "",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 66,
+          "widthComment": 121,
+          "widthDataType": 162,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      }
+    },
+    "relationshipEntities": {
+      "rel_provider_accounts_resource_targets": {
+        "id": "rel_provider_accounts_resource_targets",
+        "identification": false,
+        "relationshipType": 16,
+        "startRelationshipType": 2,
+        "start": {
+          "tableId": "t_provider_accounts",
+          "columnIds": [
+            "pa_account_id"
+          ],
+          "x": 449.718,
+          "y": 515.2308,
+          "direction": 8
+        },
+        "end": {
+          "tableId": "t_resource_targets",
+          "columnIds": [
+            "rt_account_id"
+          ],
+          "x": 690.5385,
+          "y": 629.7436,
+          "direction": 4
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      },
+      "rel_resource_targets_runtime_containers": {
+        "id": "rel_resource_targets_runtime_containers",
+        "identification": true,
+        "relationshipType": 16,
+        "startRelationshipType": 2,
+        "start": {
+          "tableId": "t_resource_targets",
+          "columnIds": [
+            "rt_resource_target_id"
+          ],
+          "x": 1149.5385,
+          "y": 981.7436,
+          "direction": 2
+        },
+        "end": {
+          "tableId": "t_runtime_containers",
+          "columnIds": [
+            "rc_resource_target_id"
+          ],
+          "x": 1274.6032,
+          "y": 983.873,
+          "direction": 1
+        },
+        "meta": {
+          "updateAt": 1785340800000,
+          "createAt": 1785340800000
+        }
+      }
+    },
+    "indexEntities": {},
+    "indexColumnEntities": {},
+    "memoEntities": {}
+  }
+}
