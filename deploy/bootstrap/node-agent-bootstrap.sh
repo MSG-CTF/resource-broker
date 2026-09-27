@@ -211,9 +211,57 @@ current_k3s_version() {
   k3s --version 2>/dev/null | awk 'NR == 1 {print $3}'
 }
 
+k3s_version_is_older_than() {
+  local target_version="$1"
+  local current_version="$2"
+  local version_pattern
+  version_pattern='^v([0-9]+)\.([0-9]+)\.([0-9]+)\+k3s([0-9]+)$'
+
+  if [[ ! "${target_version}" =~ ${version_pattern} ]]; then
+    return 1
+  fi
+  local target_major="${BASH_REMATCH[1]}"
+  local target_minor="${BASH_REMATCH[2]}"
+  local target_patch="${BASH_REMATCH[3]}"
+  local target_k3s_revision="${BASH_REMATCH[4]}"
+
+  if [[ ! "${current_version}" =~ ${version_pattern} ]]; then
+    return 1
+  fi
+  local current_major="${BASH_REMATCH[1]}"
+  local current_minor="${BASH_REMATCH[2]}"
+  local current_patch="${BASH_REMATCH[3]}"
+  local current_k3s_revision="${BASH_REMATCH[4]}"
+
+  local version_pair target_number current_number
+  for version_pair in \
+      "${target_major}:${current_major}" \
+      "${target_minor}:${current_minor}" \
+      "${target_patch}:${current_patch}" \
+      "${target_k3s_revision}:${current_k3s_revision}"; do
+    target_number="${version_pair%%:*}"
+    current_number="${version_pair##*:}"
+    if ((10#${target_number} < 10#${current_number})); then
+      return 0
+    fi
+    if ((10#${target_number} > 10#${current_number})); then
+      return 1
+    fi
+  done
+  return 1
+}
+
 install_or_update_k3s() {
   local current_version k3s_api_tls_san install_required install_exec
   current_version="$(current_k3s_version)"
+  if [[ -n "${current_version}" \
+      && ! "${current_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\+k3s[0-9]+$ ]]; then
+    fail "The installed k3s version '${current_version}' cannot be compared safely."
+  fi
+  if [[ -n "${current_version}" ]] \
+      && k3s_version_is_older_than "${K3S_VERSION}" "${current_version}"; then
+    fail "Refusing to downgrade k3s from ${current_version} to ${K3S_VERSION}. Use a clean VM or restore a datastore snapshot compatible with the requested version."
+  fi
   k3s_api_tls_san="$(k3s_credential_tls_san)"
   install_required=false
   if [[ "${current_version}" != "${K3S_VERSION}" ]]; then

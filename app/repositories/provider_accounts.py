@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.adapters.base import ProviderInstanceSummary
@@ -26,6 +26,14 @@ class ResourceSyncResult:
 class ResourceTargetListResult:
     total: int
     resources: tuple[ResourceTargetTable, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ContainerStorageUsage:
+    observed_mib: int | None
+    observed_container_count: int
+    total_container_count: int
+    current_observation_container_count: int
 
 
 class ProviderAccountRepository:
@@ -109,6 +117,60 @@ class ResourceTargetRepository:
             )
         )
         return tuple(self._session.scalars(statement).all())
+
+    def container_storage_usage_by_target(
+        self,
+        resource_target_ids: tuple[UUID, ...],
+    ) -> dict[UUID, ContainerStorageUsage]:
+        if not resource_target_ids:
+            return {}
+
+        current_observation = (
+            RuntimeContainerTable.observed_at
+            == ResourceTargetTable.runtime_observed_at
+        )
+        current_storage_usage = case(
+            (current_observation, RuntimeContainerTable.storage_usage_mib),
+            else_=None,
+        )
+        statement = (
+            select(
+                RuntimeContainerTable.resource_target_id,
+                func.count(RuntimeContainerTable.container_id),
+                func.count(current_storage_usage),
+                func.sum(current_storage_usage),
+                func.sum(
+                    case(
+                        (current_observation, 1),
+                        else_=0,
+                    )
+                ),
+            )
+            .join(
+                ResourceTargetTable,
+                ResourceTargetTable.resource_target_id
+                == RuntimeContainerTable.resource_target_id,
+            )
+            .where(
+                RuntimeContainerTable.resource_target_id.in_(resource_target_ids)
+            )
+            .group_by(RuntimeContainerTable.resource_target_id)
+        )
+        return {
+            resource_target_id: ContainerStorageUsage(
+                observed_mib=int(observed_mib) if observed_mib is not None else None,
+                observed_container_count=int(observed_count),
+                total_container_count=int(total_count),
+                current_observation_container_count=int(current_count or 0),
+            )
+            for (
+                resource_target_id,
+                total_count,
+                observed_count,
+                observed_mib,
+                current_count,
+            ) in self._session.execute(statement)
+        }
 
     def list_all(
         self,

@@ -1,0 +1,18 @@
+# Existing Service Account attached to the central Broker VM or workload.
+central_service_account_email = "msg-broker-controller@central-broker-project.iam.gserviceaccount.com"
+
+# Add all target GCP Project IDs. Project names and numeric project numbers are
+# not accepted here.
+target_project_ids = [
+  "target-project-01",
+  "target-project-02",
+  # ...add the remaining projects...
+]
+
+# Required only for the Broker's GCP VM Manager/OS Policy Bootstrap jobs.
+# This capability can execute software as root on matching VMs.
+enable_vm_manager_bootstrap = false
+
+# Required only when this identity must create/update VMs and attach arbitrary
+# service accounts owned by each target project. Prefer leaving this disabled.
+grant_project_wide_service_account_user = false

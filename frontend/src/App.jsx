@@ -18,7 +18,6 @@ import {
   verifyProviderAccount,
 } from "./api/providerAccounts.js";
 
-const DEFAULT_K3S_VERSION = "v1.33.3+k3s1";
 const CANDIDATE_OBSERVATION_STALE_MS = 10 * 60 * 1000;
 
 const PROVIDER_DEFINITIONS = {
@@ -827,7 +826,7 @@ function ResourceInventory({
   const [bootstrapError, setBootstrapError] = useState(null);
   const [bootstrapAction, setBootstrapAction] = useState("INSTALL");
   const [bootstrapVersion, setBootstrapVersion] = useState("0.4.2");
-  const [k3sVersion, setK3sVersion] = useState(DEFAULT_K3S_VERSION);
+  const [k3sVersion, setK3sVersion] = useState("");
   const [agentImage, setAgentImage] = useState("");
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
   const [bootstrapReloadKey, setBootstrapReloadKey] = useState(0);
@@ -1226,7 +1225,17 @@ function ResourceInventory({
                       <>
                         <label>
                           <span>k3s 버전</span>
-                          <input required value={k3sVersion} onChange={(event) => setK3sVersion(event.target.value)} placeholder="v1.33.3+k3s1" />
+                          <input
+                            required
+                            pattern="v[0-9]+\.[0-9]+\.[0-9]+\+k3s[0-9]+"
+                            title="vX.Y.Z+k3sN 형식으로 입력하세요."
+                            value={k3sVersion}
+                            onChange={(event) => setK3sVersion(event.target.value)}
+                            placeholder="예: v1.36.4+k3s1"
+                          />
+                          <small>
+                            VM에 k3s가 이미 있으면 같은 버전 또는 더 높은 버전만 사용할 수 있습니다.
+                          </small>
                         </label>
                         <label className="bootstrap-image-field">
                           <span>Node Agent image (멀티아키텍처 digest 필수)</span>
