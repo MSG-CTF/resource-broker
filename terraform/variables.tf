@@ -27,14 +27,18 @@ variable "target_project_ids" {
   }
 }
 
-variable "enable_vm_manager_bootstrap" {
-  description = "Grant OS Policy Assignment write and report read permissions used by the Broker GCP Bootstrap flow. This is equivalent to remote code execution on matching VMs."
-  type        = bool
-  default     = false
-}
+variable "target_billing_account_ids" {
+  description = "Unique Cloud Billing account IDs whose cost information the central service account can view."
+  type        = set(string)
 
-variable "grant_project_wide_service_account_user" {
-  description = "Grant roles/iam.serviceAccountUser at each target project. Enable only when the Broker must attach arbitrary project service accounts to VMs."
-  type        = bool
-  default     = false
+  validation {
+    condition = (
+      length(var.target_billing_account_ids) > 0 &&
+      alltrue([
+        for billing_account_id in var.target_billing_account_ids :
+        can(regex("^[0-9A-Z]{6}-[0-9A-Z]{6}-[0-9A-Z]{6}$", billing_account_id))
+      ])
+    )
+    error_message = "target_billing_account_ids must contain at least one valid Cloud Billing account ID in XXXXXX-XXXXXX-XXXXXX format."
+  }
 }

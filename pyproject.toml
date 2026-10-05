@@ -14,6 +14,7 @@ dependencies = [
     "boto3>=1.40,<2",
     "cryptography>=46,<48",
     "fastapi>=0.136,<1",
+    "google-cloud-bigquery>=3,<4",
     "google-cloud-compute>=1,<2",
     "google-cloud-os-config>=1.25,<2",
     "google-auth>=2.40,<3",

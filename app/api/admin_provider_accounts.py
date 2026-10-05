@@ -6,6 +6,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.adapters.gcp_billing import (
+    GcpBillingAdapterError,
+    GcpBillingDependencyError,
+    GcpBillingUnavailableError,
+)
 from app.api.admin_auth import require_admin
 from app.db.session import get_db_session
 from app.db.tables import ProviderAccountTable, ResourceTargetTable
@@ -15,6 +20,10 @@ from app.schemas.provider_account import (
     AzureAccountResponse,
     ErrorResponse,
     GcpAccountResponse,
+    GcpCreditEstimateResponse,
+    GcpCreditSettingsResponse,
+    GcpCreditTrackingConfig,
+    GcpCreditTrackingUpdateRequest,
     ProviderAccountCreateRequest,
     ProviderAccountDeleteResponse,
     ProviderAccountListResponse,
@@ -25,6 +34,14 @@ from app.schemas.provider_account import (
     ProviderScopeResult,
 )
 from app.schemas.resource_target import ResourceCapacityResponse
+from app.services.gcp_credit_service import (
+    GcpCreditAccountNotFoundError,
+    GcpCreditRequiresGcpAccountError,
+    GcpCreditService,
+    GcpCreditTrackingNotConfiguredError,
+    GcpCreditTrackingSettings,
+    InvalidGcpCreditTrackingConfigError,
+)
 from app.services.provider_account_service import (
     DuplicateProviderAccountError,
     InvalidProviderAccountConfigError,
@@ -157,6 +174,19 @@ def _sync_response(outcome: SyncOutcome) -> ProviderAccountSyncResponse:
         retired_count=outcome.retired_count,
         scopes=_scope_results(outcome.scopes),
         resources=[_resource_response(item) for item in outcome.resources],
+    )
+
+
+def _credit_tracking_config(
+    settings: GcpCreditTrackingSettings,
+) -> GcpCreditTrackingConfig:
+    return GcpCreditTrackingConfig(
+        billing_account_id=settings.billing_account_id,
+        billing_export_project_id=settings.billing_export_project_id,
+        billing_export_dataset_id=settings.billing_export_dataset_id,
+        baseline_remaining_credit=settings.baseline_remaining_credit,
+        currency=settings.currency,
+        baseline_at=settings.baseline_at,
     )
 
 
@@ -324,6 +354,144 @@ def sync_provider_account(
             content=response.model_dump(mode="json"),
         )
     return response
+
+
+@router.put(
+    "/{account_id}/gcp-credit-settings",
+    response_model=GcpCreditSettingsResponse,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+    },
+)
+def update_gcp_credit_settings(
+    account_id: UUID,
+    request: GcpCreditTrackingUpdateRequest,
+    session: Session = Depends(get_db_session),
+) -> GcpCreditSettingsResponse | Response:
+    try:
+        settings = GcpCreditService(session).update_settings(
+            account_id,
+            billing_account_id=request.billing_account_id,
+            billing_export_project_id=request.billing_export_project_id,
+            billing_export_dataset_id=request.billing_export_dataset_id,
+            baseline_remaining_credit=request.baseline_remaining_credit,
+            currency=request.currency,
+        )
+    except GcpCreditAccountNotFoundError:
+        return _error_response(
+            status.HTTP_404_NOT_FOUND,
+            "PROVIDER_ACCOUNT_NOT_FOUND",
+            "The provider account was not found.",
+        )
+    except GcpCreditRequiresGcpAccountError:
+        return _error_response(
+            status.HTTP_400_BAD_REQUEST,
+            "GCP_ACCOUNT_REQUIRED",
+            "Credit tracking is supported only for GCP accounts.",
+        )
+    except InvalidGcpCreditTrackingConfigError:
+        return _error_response(
+            status.HTTP_400_BAD_REQUEST,
+            "INVALID_GCP_CREDIT_TRACKING_CONFIG",
+            "The GCP credit tracking configuration is invalid.",
+        )
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            "The GCP credit tracking settings could not be saved.",
+        )
+
+    return GcpCreditSettingsResponse(
+        account_id=account_id,
+        credit_tracking=_credit_tracking_config(settings),
+    )
+
+
+@router.get(
+    "/{account_id}/gcp-credit",
+    response_model=GcpCreditEstimateResponse,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+    },
+)
+def get_gcp_credit_estimate(
+    account_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> GcpCreditEstimateResponse | Response:
+    try:
+        estimate = GcpCreditService(session).estimate(account_id)
+    except GcpCreditAccountNotFoundError:
+        return _error_response(
+            status.HTTP_404_NOT_FOUND,
+            "PROVIDER_ACCOUNT_NOT_FOUND",
+            "The provider account was not found.",
+        )
+    except GcpCreditRequiresGcpAccountError:
+        return _error_response(
+            status.HTTP_400_BAD_REQUEST,
+            "GCP_ACCOUNT_REQUIRED",
+            "Credit tracking is supported only for GCP accounts.",
+        )
+    except GcpCreditTrackingNotConfiguredError:
+        return _error_response(
+            status.HTTP_409_CONFLICT,
+            "GCP_CREDIT_TRACKING_NOT_CONFIGURED",
+            "Configure a current credit baseline before requesting an estimate.",
+        )
+    except InvalidGcpCreditTrackingConfigError:
+        return _error_response(
+            status.HTTP_400_BAD_REQUEST,
+            "INVALID_GCP_CREDIT_TRACKING_CONFIG",
+            "The saved GCP credit tracking configuration is invalid.",
+        )
+    except GcpBillingDependencyError as error:
+        return _error_response(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            error.error_code,
+            error.public_message,
+        )
+    except GcpBillingUnavailableError as error:
+        return _error_response(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            error.error_code,
+            error.public_message,
+        )
+    except GcpBillingAdapterError as error:
+        return _error_response(
+            status.HTTP_502_BAD_GATEWAY,
+            error.error_code,
+            error.public_message,
+        )
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            "The GCP credit tracking settings could not be loaded.",
+        )
+
+    return GcpCreditEstimateResponse(
+        account_id=estimate.account_id,
+        currency=estimate.currency,
+        estimated_remaining_credit=estimate.estimated_remaining_credit,
+        baseline_remaining_credit=estimate.baseline_remaining_credit,
+        promotional_credit_used=estimate.promotional_credit_used,
+        baseline_at=estimate.baseline_at,
+        data_through=estimate.data_through,
+        calculated_at=estimate.calculated_at,
+    )
 
 
 @router.delete(

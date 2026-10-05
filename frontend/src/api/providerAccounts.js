@@ -137,6 +137,22 @@ export function syncProviderAccount(accountId) {
   });
 }
 
+export function updateGcpCreditSettings(accountId, payload) {
+  return request(
+    `/v1/admin/provider-accounts/${encodeURIComponent(accountId)}/gcp-credit-settings`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function getGcpCreditEstimate(accountId) {
+  return request(
+    `/v1/admin/provider-accounts/${encodeURIComponent(accountId)}/gcp-credit`,
+  );
+}
+
 export function deleteProviderAccount(accountId) {
   return request(`/v1/admin/provider-accounts/${accountId}`, {
     method: "DELETE",

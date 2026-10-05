@@ -9,10 +9,10 @@ target_project_ids = [
   # ...add the remaining projects...
 ]
 
-# Required only for the Broker's GCP VM Manager/OS Policy Bootstrap jobs.
-# This capability can execute software as root on matching VMs.
-enable_vm_manager_bootstrap = false
-
-# Required only when this identity must create/update VMs and attach arbitrary
-# service accounts owned by each target project. Prefer leaving this disabled.
-grant_project_wide_service_account_user = false
+# Add every Cloud Billing account linked to the target projects. Multiple
+# projects can share one Billing account, so each ID is listed only once.
+target_billing_account_ids = [
+  "000000-000000-000000",
+  "111111-111111-111111",
+  # ...add the remaining Cloud Billing account IDs...
+]

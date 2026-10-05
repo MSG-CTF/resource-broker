@@ -491,6 +491,61 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 }
 .resource-modal-close:hover { color: #17233c; background: #e9edf3; }
 .resource-modal-body { padding: 24px; display: grid; gap: 13px; }
+.credit-modal { width: min(100%, 680px); }
+.credit-modal-body { gap: 16px; }
+.credit-modal-body .notice { margin: 0; }
+.credit-estimate-notice {
+  padding: 14px 16px;
+  color: #31527f;
+  background: #eef5ff;
+  border: 1px solid #d4e4fa;
+  border-radius: 11px;
+}
+.credit-estimate-notice strong { display: block; font-size: 12px; }
+.credit-estimate-notice p { margin: 5px 0 0; font-size: 10px; line-height: 1.55; }
+.credit-loading {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: #77849a;
+  font-size: 12px;
+}
+.credit-estimate-card {
+  padding: 22px;
+  display: grid;
+  gap: 7px;
+  background: linear-gradient(135deg, #f0faf6, #f6faff);
+  border: 1px solid #cfe8dc;
+  border-radius: 14px;
+}
+.credit-estimate-card > span { color: #46715f; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.credit-estimate-card > strong { color: #176449; font-size: 34px; letter-spacing: -0.045em; }
+.credit-estimate-card > small { color: #728177; font-size: 10px; }
+.credit-breakdown {
+  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid #d7e8df;
+}
+.credit-breakdown div { padding: 13px 12px 0 0; }
+.credit-breakdown dt { color: #7e8d86; font-size: 9px; font-weight: 750; }
+.credit-breakdown dd { margin: 5px 0 0; color: #33463e; font-size: 11px; font-weight: 700; }
+.credit-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.credit-settings-form { display: grid; gap: 14px; }
+.credit-settings-form label { display: grid; gap: 6px; }
+.credit-settings-form label > span { color: #364158; font-size: 11px; font-weight: 750; }
+.credit-settings-form label > small { color: #8792a5; font-size: 9px; }
+.credit-settings-form > small { color: #7f899b; font-size: 10px; }
+.credit-baseline-warning {
+  padding: 12px 14px;
+  color: #885d15;
+  background: #fff8e7;
+  border: 1px solid #eedda9;
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.credit-form-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 12px; }
 .resource-detail-primary {
   padding: 16px 17px;
   display: grid;
@@ -694,6 +749,7 @@ footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: s
   .capacity-metrics strong { font-size: 14px; }
   .resource-modal-backdrop { padding: 12px; }
   .resource-modal-header, .resource-modal-body { padding: 18px; }
+  .credit-form-row, .credit-breakdown { grid-template-columns: 1fr; }
   .resource-detail-grid { grid-template-columns: 1fr; }
   .resource-detail-grid div,
   .resource-detail-grid div:nth-child(2n),

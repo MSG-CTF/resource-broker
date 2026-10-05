@@ -267,6 +267,14 @@ Bootstrap 0.4.2는 공식 `k3s-io/k3s` 저장소의 특정 커밋에 있는 inst
 다운로드하고 root로 실행하기 전에 `MSG_BROKER_K3S_INSTALL_SHA256`과 대조한다.
 내용이 갱신될 수 있는 `get.k3s.io` 주소는 기본값으로 사용하지 않는다.
 
+Admin 작업의 k3s 버전은 코드에 고정된 기본값을 사용하지 않고 작업마다
+`vX.Y.Z+k3sN` 형식으로 명시한다. k3s가 없는 깨끗한 VM에는 지정 버전을
+설치하고, 기존 k3s VM에는 같은 버전 또는 더 높은 버전만 허용한다. 기존
+datastore를 그대로 둔 하향 설치는 Kubernetes Secret과 datastore 호환성을
+깨뜨릴 수 있으므로 Bootstrap이 installer 실행 전에 거부한다. 낮은 버전이
+필요하면 깨끗한 VM을 사용하거나 해당 버전에서 생성한 datastore snapshot을
+복원해야 한다.
+
 - 출처: [공식 설치 스크립트](https://github.com/k3s-io/k3s/blob/2977c525a2e7a487886107ce4df43630ae9b03b2/install.sh)
 - 커밋: `2977c525a2e7a487886107ce4df43630ae9b03b2` (2026-09-03)
 - 다운로드: `https://raw.githubusercontent.com/k3s-io/k3s/2977c525a2e7a487886107ce4df43630ae9b03b2/install.sh`
@@ -300,11 +308,10 @@ Broker 컨테이너에는 다음 설정이 필요하다.
 K3S_CREDENTIAL_UPLOAD_TOKEN_SECRET=<bootstrap-upload-secret-32-bytes-minimum>
 K3S_CREDENTIAL_ENCRYPTION_SECRET=<database-encryption-secret-32-bytes-minimum>
 K3S_ADDRESS_SOURCE=public_ip
-RUNTIME_API_TOKEN_SECRET=<runtime-api-secret-32-bytes-minimum>
-RUNTIME_API_TOKEN_SUBJECT=runtime
+RUNTIME_API_TOKEN=<separate-runtime-token-32-characters-minimum>
 ```
 
-세 secret은 서로 다른 값이어야 한다. `K3S_ADDRESS_SOURCE`는 Runtime과 대상 VM의
+세 secret/token은 서로 다른 값이어야 한다. `K3S_ADDRESS_SOURCE`는 Runtime과 대상 VM의
 네트워크에 맞춰 `public_ip` 또는 `private_ip`를 선택한다. 필수 storage 설정이나
 해당 IP가 없으면 `install/update` job은 Provider 원격 실행 전에 각각 `503` 또는
 `422`로 거절된다.
@@ -346,14 +353,13 @@ Runtime은 다음 API로 저장된 credential을 pull한다.
 ```http
 GET /v1/runtime/k3s-credentials?limit=100&after=<optional-resource-target-uuid>
 GET /v1/runtime/k3s-credentials/{resource_target_id}
-Authorization: Bearer <RUNTIME_JWT>
+Authorization: Bearer <RUNTIME_API_TOKEN>
 ```
 
-Gateway를 통할 때 외부 경로는 `/api/v1/runtime/k3s-credentials`다. Runtime JWT는
-HS256이며 `iss=msg-runtime`, `aud=msg-broker-k3s-credentials`,
-`type=runtime_access`, `sub=RUNTIME_API_TOKEN_SUBJECT`를 사용한다. `iat`, `nbf`,
-`exp`, `jti`가 필수이고 최대 수명은 300초다. 목록 응답은 최대 200개씩 페이지로
-반환하며, Runtime은 `next_cursor`가 없어질 때까지 반복한다.
+Gateway를 통할 때 외부 경로는 `/api/v1/runtime/k3s-credentials`다. Broker와
+Runtime에 서로 같은 고정 `RUNTIME_API_TOKEN`을 설정하고, Scheduler/Admin
+token과는 다른 값을 사용한다. 목록 응답은 최대 200개씩 페이지로 반환하며,
+Runtime은 `next_cursor`가 없어질 때까지 반복한다.
 
 Runtime은 반환된 `kubeconfig_base64`를 디코드해 사용하며 대상 VM의 `6443/tcp`에
 도달할 수 있어야 한다. 해당 IP가 k3s serving certificate SAN에 포함되는지와

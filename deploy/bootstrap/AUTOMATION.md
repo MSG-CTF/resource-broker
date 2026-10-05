@@ -17,10 +17,16 @@ Content-Type: application/json
 {
   "action": "INSTALL",
   "bootstrap_version": "0.4.2",
-  "k3s_version": "v1.33.3+k3s1",
+  "k3s_version": "v1.36.4+k3s1",
   "agent_image": "repository/agent@sha256:<64-hex-digest>"
 }
 ```
+
+The Admin UI does not prefill a fixed k3s version. Each install or update job
+must explicitly provide the desired `vX.Y.Z+k3sN` value. A clean VM can install
+any valid requested version. When k3s already exists, the common Bootstrap
+refuses a lower version before running the installer; use a clean VM or restore
+a datastore snapshot created on the requested older version instead.
 
 Only `INSTALL`, `UPDATE`, `CHECK`, and `REMOVE` are accepted. There is no
 arbitrary-command API. A database partial unique index permits only one active

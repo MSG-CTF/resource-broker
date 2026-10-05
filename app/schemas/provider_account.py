@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -88,6 +89,38 @@ ProviderIdentifier = Annotated[
         strict=True,
     ),
 ]
+GcpProjectId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        pattern=r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+        strict=True,
+    ),
+]
+GcpBillingAccountId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        pattern=r"^[0-9A-Z]{6}-[0-9A-Z]{6}-[0-9A-Z]{6}$",
+        strict=True,
+    ),
+]
+BigQueryDatasetId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,1023}$",
+        strict=True,
+    ),
+]
+CurrencyCode = Annotated[
+    str,
+    StringConstraints(pattern=r"^[A-Z]{3}$", strict=True),
+]
+CreditAmount = Annotated[
+    Decimal,
+    Field(ge=0, max_digits=38, decimal_places=9),
+]
 
 
 def _require_unique_values(field_name: str, values: list[str]) -> list[str]:
@@ -100,13 +133,29 @@ class ApiSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class GcpAccountConfig(ApiSchema):
+class GcpCreditTrackingUpdateRequest(ApiSchema):
+    billing_account_id: GcpBillingAccountId
+    billing_export_project_id: GcpProjectId
+    billing_export_dataset_id: BigQueryDatasetId
+    baseline_remaining_credit: CreditAmount
+    currency: CurrencyCode = "USD"
+
+
+class GcpCreditTrackingConfig(GcpCreditTrackingUpdateRequest):
+    baseline_at: datetime
+
+
+class GcpAccountCreateConfig(ApiSchema):
     project_ids: list[ProviderIdentifier] = Field(min_length=1)
 
     @field_validator("project_ids")
     @classmethod
     def require_unique_projects(cls, value: list[str]) -> list[str]:
         return _require_unique_values("project_ids", value)
+
+
+class GcpAccountConfig(GcpAccountCreateConfig):
+    credit_tracking: GcpCreditTrackingConfig | None = None
 
 
 class AwsAccountCreateConfig(ApiSchema):
@@ -149,7 +198,7 @@ class ProviderAccountCreateBase(ApiSchema):
 class GcpAccountCreateRequest(ProviderAccountCreateBase):
     provider: Literal[Provider.GCP]
     external_account_id: ExternalAccountId
-    config: GcpAccountConfig
+    config: GcpAccountCreateConfig
 
 
 class AwsAccountCreateRequest(ProviderAccountCreateBase):
@@ -286,6 +335,23 @@ class ProviderAccountSyncResponse(ApiSchema):
 class ProviderAccountDeleteResponse(ApiSchema):
     account_id: UUID
     deleted_resource_count: int = Field(ge=0)
+
+
+class GcpCreditSettingsResponse(ApiSchema):
+    account_id: UUID
+    credit_tracking: GcpCreditTrackingConfig
+
+
+class GcpCreditEstimateResponse(ApiSchema):
+    account_id: UUID
+    currency: CurrencyCode
+    estimated_remaining_credit: CreditAmount
+    baseline_remaining_credit: CreditAmount
+    promotional_credit_used: CreditAmount
+    baseline_at: datetime
+    data_through: datetime | None
+    calculated_at: datetime
+    is_estimate: Literal[True] = True
 
 
 class ErrorDetail(ApiSchema):

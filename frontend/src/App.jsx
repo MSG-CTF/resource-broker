@@ -6,6 +6,7 @@ import {
   createBootstrapJob,
   createProviderAccount,
   deleteProviderAccount,
+  getGcpCreditEstimate,
   getAdminToken,
   listBootstrapJobs,
   listProviderAccounts,
@@ -14,6 +15,7 @@ import {
   loginAdmin,
   setAdminToken,
   syncProviderAccount,
+  updateGcpCreditSettings,
   updateResourceTargetCandidateRegistration,
   verifyProviderAccount,
 } from "./api/providerAccounts.js";
@@ -182,6 +184,19 @@ function formatCpu(value) {
 function formatMib(value) {
   if (value === null || value === undefined) return "미수집";
   return `${new Intl.NumberFormat("en-US").format(value)} MiB`;
+}
+
+function formatMoney(value, currency = "USD") {
+  if (value === null || value === undefined) return "조회 전";
+  try {
+    return new Intl.NumberFormat("ko-KR", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(Number(value));
+  } catch {
+    return `${Number(value).toLocaleString("ko-KR")} ${currency}`;
+  }
 }
 
 function CapacitySummary({
@@ -648,6 +663,7 @@ function AccountTable({
   actionState,
   onVerify,
   onSync,
+  onCredit,
   onDelete,
 }) {
   if (accounts.length === 0) {
@@ -679,6 +695,8 @@ function AccountTable({
             const isImplemented = ACTIVE_PROVIDERS.has(account.provider);
             const isVerifying = actionState === `verify:${account.account_id}`;
             const isSyncing = actionState === `sync:${account.account_id}`;
+            const isCheckingCredit =
+              actionState === `credit:${account.account_id}`;
             const isDeleting = actionState === `delete:${account.account_id}`;
             const scopes = accountScopes(account);
 
@@ -747,6 +765,17 @@ function AccountTable({
                     >
                       {isSyncing ? "동기화 중..." : "Sync"}
                     </button>
+                    {account.provider === "GCP" && (
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        disabled={Boolean(actionState)}
+                        title="GCP 프로모션 크레딧 추정 잔액 조회"
+                        onClick={() => onCredit(account)}
+                      >
+                        {isCheckingCredit ? "조회 중..." : "비용 조회"}
+                      </button>
+                    )}
                     <button
                       className="button button-danger"
                       type="button"
@@ -764,6 +793,262 @@ function AccountTable({
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function GcpCreditModal({
+  account,
+  estimate,
+  loading,
+  error,
+  onClose,
+  onDismissError,
+  onRefresh,
+  onSave,
+}) {
+  const tracking = account.config?.credit_tracking;
+  const [editing, setEditing] = useState(!tracking);
+  const [form, setForm] = useState({
+    billingAccountId: tracking?.billing_account_id || "",
+    billingExportProjectId: tracking?.billing_export_project_id || "",
+    billingExportDatasetId: tracking?.billing_export_dataset_id || "",
+    baselineRemainingCredit: tracking?.baseline_remaining_credit || "",
+    currency: tracking?.currency || "USD",
+  });
+
+  function updateField(event) {
+    const { name, value } = event.target;
+    setForm((current) => ({
+      ...current,
+      [name]: ["billingAccountId", "currency"].includes(name)
+        ? value.toUpperCase()
+        : value,
+    }));
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    const saved = await onSave(account, {
+      billing_account_id: form.billingAccountId.trim(),
+      billing_export_project_id: form.billingExportProjectId.trim(),
+      billing_export_dataset_id: form.billingExportDatasetId.trim(),
+      baseline_remaining_credit: form.baselineRemainingCredit,
+      currency: form.currency.trim().toUpperCase(),
+    });
+    if (saved) setEditing(false);
+  }
+
+  return (
+    <div
+      className="resource-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !loading) onClose();
+      }}
+    >
+      <section
+        className="resource-modal credit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gcp-credit-modal-title"
+      >
+        <header className="resource-modal-header">
+          <div className="vm-identity">
+            <div className="provider-avatar">G</div>
+            <div>
+              <span className="vm-provider">Google Cloud</span>
+              <h2 id="gcp-credit-modal-title">
+                {account.display_name || account.external_account_id} 비용 조회
+              </h2>
+            </div>
+          </div>
+          <button
+            className="resource-modal-close"
+            type="button"
+            aria-label="비용 조회 닫기"
+            disabled={loading}
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="resource-modal-body credit-modal-body">
+          <div className="credit-estimate-notice">
+            <strong>추정 잔여 크레딧</strong>
+            <p>
+              Google Credits 화면의 현재 잔액을 기준으로 저장한 뒤,
+              BigQuery Billing Export에 기록된 PROMOTION 사용액을 차감합니다.
+            </p>
+          </div>
+
+          <ErrorBanner error={error} onClose={onDismissError} />
+
+          {!editing && (
+            <>
+              {loading && (
+                <div className="credit-loading">
+                  크레딧 사용 내역을 조회하는 중입니다...
+                </div>
+              )}
+              {estimate && (
+                <section className="credit-estimate-card" aria-live="polite">
+                  <span>현재 추정 잔액</span>
+                  <strong>
+                    {formatMoney(
+                      estimate.estimated_remaining_credit,
+                      estimate.currency,
+                    )}
+                  </strong>
+                  <small>
+                    공식 Credits 잔액이 아닌 Billing Export 기반 추정치입니다.
+                  </small>
+                  <dl className="credit-breakdown">
+                    <div>
+                      <dt>저장한 기준 잔액</dt>
+                      <dd>
+                        {formatMoney(
+                          estimate.baseline_remaining_credit,
+                          estimate.currency,
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>기준 이후 사용된 프로모션</dt>
+                      <dd>
+                        -{formatMoney(
+                          estimate.promotional_credit_used,
+                          estimate.currency,
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>기준 시각</dt>
+                      <dd>{formatDate(estimate.baseline_at)}</dd>
+                    </div>
+                    <div>
+                      <dt>내보내기 반영 시각</dt>
+                      <dd>{formatDate(estimate.data_through)}</dd>
+                    </div>
+                  </dl>
+                </section>
+              )}
+              <div className="credit-modal-actions">
+                <button
+                  className="button button-primary"
+                  type="button"
+                  disabled={loading}
+                  onClick={() => onRefresh(account)}
+                >
+                  {loading ? "조회 중..." : "다시 조회"}
+                </button>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setEditing(true)}
+                >
+                  기준값 수정
+                </button>
+              </div>
+            </>
+          )}
+
+          {editing && (
+            <form className="credit-settings-form" onSubmit={handleSubmit}>
+              <div className="credit-baseline-warning">
+                저장하는 순간이 새 기준 시각이 됩니다. 먼저 GCP Credits 화면의
+                Remaining value를 확인해 그대로 입력하세요.
+              </div>
+              <label>
+                <span>Billing Account ID</span>
+                <input
+                  name="billingAccountId"
+                  value={form.billingAccountId}
+                  placeholder="000000-000000-000000"
+                  pattern="[0-9A-Z]{6}-[0-9A-Z]{6}-[0-9A-Z]{6}"
+                  required
+                  onChange={updateField}
+                />
+                <small>GCP Console의 결제 → 계정 관리에서 확인합니다.</small>
+              </label>
+              <label>
+                <span>Billing Export Project ID</span>
+                <input
+                  name="billingExportProjectId"
+                  value={form.billingExportProjectId}
+                  placeholder="billing-export-project"
+                  required
+                  onChange={updateField}
+                />
+              </label>
+              <label>
+                <span>Billing Export Dataset ID</span>
+                <input
+                  name="billingExportDatasetId"
+                  value={form.billingExportDatasetId}
+                  placeholder="billing_export"
+                  required
+                  onChange={updateField}
+                />
+                <small>
+                  Standard usage cost export가 실제로 생성되는 dataset ID입니다.
+                </small>
+              </label>
+              <div className="credit-form-row">
+                <label>
+                  <span>현재 남은 크레딧</span>
+                  <input
+                    type="number"
+                    name="baselineRemainingCredit"
+                    value={form.baselineRemainingCredit}
+                    min="0"
+                    step="0.000000001"
+                    placeholder="1000.00"
+                    required
+                    onChange={updateField}
+                  />
+                </label>
+                <label>
+                  <span>통화</span>
+                  <input
+                    name="currency"
+                    value={form.currency}
+                    minLength="3"
+                    maxLength="3"
+                    pattern="[A-Z]{3}"
+                    required
+                    onChange={updateField}
+                  />
+                </label>
+              </div>
+              <small>
+                한 GCP 등록 계정에는 하나의 Billing Account 기준 잔액을 연결합니다.
+              </small>
+              <div className="credit-modal-actions">
+                <button
+                  className="button button-primary"
+                  type="submit"
+                  disabled={loading}
+                >
+                  {loading ? "저장 및 조회 중..." : "기준 저장 후 조회"}
+                </button>
+                {tracking && (
+                  <button
+                    className="button button-ghost"
+                    type="button"
+                    disabled={loading}
+                    onClick={() => setEditing(false)}
+                  >
+                    취소
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -1384,6 +1669,10 @@ function AdminDashboard({ onLogout }) {
   const [actionState, setActionState] = useState(null);
   const [syncResult, setSyncResult] = useState(null);
   const [syncAccountName, setSyncAccountName] = useState("");
+  const [creditAccount, setCreditAccount] = useState(null);
+  const [creditEstimate, setCreditEstimate] = useState(null);
+  const [creditLoading, setCreditLoading] = useState(false);
+  const [creditError, setCreditError] = useState(null);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -1506,6 +1795,74 @@ function AdminDashboard({ onLogout }) {
       setError(requestError);
       await loadAccounts();
     } finally {
+      setActionState(null);
+    }
+  }
+
+  async function refreshCreditEstimate(account) {
+    setCreditError(null);
+    setCreditLoading(true);
+    setActionState(`credit:${account.account_id}`);
+    try {
+      const result = await getGcpCreditEstimate(account.account_id);
+      setCreditEstimate(result);
+    } catch (requestError) {
+      setCreditError(requestError);
+    } finally {
+      setCreditLoading(false);
+      setActionState(null);
+    }
+  }
+
+  async function handleCredit(account) {
+    if (account.provider !== "GCP") return;
+    setCreditAccount(account);
+    setCreditEstimate(null);
+    setCreditError(null);
+    if (account.config?.credit_tracking) {
+      await refreshCreditEstimate(account);
+    }
+  }
+
+  async function handleCreditSettings(account, payload) {
+    setCreditError(null);
+    setCreditEstimate(null);
+    setCreditLoading(true);
+    setActionState(`credit-settings:${account.account_id}`);
+    try {
+      const response = await updateGcpCreditSettings(
+        account.account_id,
+        payload,
+      );
+      const updatedAccount = {
+        ...account,
+        config: {
+          ...account.config,
+          credit_tracking: response.credit_tracking,
+        },
+      };
+      setCreditAccount(updatedAccount);
+      setAccounts((current) =>
+        current.map((item) =>
+          item.account_id === updatedAccount.account_id
+            ? updatedAccount
+            : item,
+        ),
+      );
+      setNotice("GCP 크레딧 기준값을 저장했습니다.");
+
+      try {
+        const estimate = await getGcpCreditEstimate(account.account_id);
+        setCreditEstimate(estimate);
+      } catch (requestError) {
+        setCreditError(requestError);
+      }
+      return true;
+    } catch (requestError) {
+      setCreditError(requestError);
+      return false;
+    } finally {
+      setCreditLoading(false);
       setActionState(null);
     }
   }
@@ -1644,7 +2001,7 @@ function AdminDashboard({ onLogout }) {
                   <span className="eyebrow">Provider accounts</span>
                   <h1>계정 관리</h1>
                 </div>
-                <span>등록 · 검증 · 동기화 · 삭제</span>
+                <span>등록 · 검증 · 동기화 · GCP 비용 조회 · 삭제</span>
               </div>
 
               <section className="metric-grid metric-grid-accounts" aria-label="계정 요약">
@@ -1674,6 +2031,7 @@ function AdminDashboard({ onLogout }) {
                       actionState={actionState}
                       onVerify={handleVerify}
                       onSync={handleSync}
+                      onCredit={handleCredit}
                       onDelete={handleDelete}
                     />
                   )}
@@ -1712,6 +2070,20 @@ function AdminDashboard({ onLogout }) {
           )}
         </div>
       </main>
+
+      {creditAccount && (
+        <GcpCreditModal
+          key={`${creditAccount.account_id}:${creditAccount.config?.credit_tracking?.baseline_at || "new"}`}
+          account={creditAccount}
+          estimate={creditEstimate}
+          loading={creditLoading}
+          error={creditError}
+          onClose={() => setCreditAccount(null)}
+          onDismissError={() => setCreditError(null)}
+          onRefresh={refreshCreditEstimate}
+          onSave={handleCreditSettings}
+        />
+      )}
 
       <footer>
         <span>MSG Resource Broker</span>

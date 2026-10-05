@@ -34,6 +34,20 @@ installer 다운로드 내용이 bundle에 고정된 checksum과 달라 실행 �
 [installer pin](../deploy/bootstrap/README.md#k3s-installer-pin-갱신)에 기록한다.
 checksum 검사는 유지하며, 선택한 k3s 버전과 Agent digest를 임의로 바꾸지 않는다.
 
+## 기존 k3s보다 낮은 버전 입력
+
+VM에 이미 설치된 k3s보다 낮은 버전을 `INSTALL` 또는 `UPDATE` 작업에 입력하면
+기존 datastore를 그대로 둔 채 control plane binary만 하향될 수 있다. 이 경우
+API server가 기존 Kubernetes Secret을 읽지 못해
+`identity transformer tried to read encrypted data`를 반복하고 k3s가 Ready가
+되지 않을 수 있다.
+
+Admin UI는 고정 k3s 기본값을 자동 입력하지 않는다. 작업마다 원하는 버전을
+`vX.Y.Z+k3sN` 형식으로 입력하며, Bootstrap은 기존 k3s가 있으면 같은 버전 또는
+더 높은 버전만 허용한다. 낮은 버전이 반드시 필요하면 깨끗한 VM을 사용하거나
+그 버전에서 생성한 datastore snapshot을 복원한다. 기존 DB를 남긴 채 작업을
+재시도하거나 k3s data directory를 임의로 삭제하지 않는다.
+
 ## k3s 인증정보 업로드 HTTP 422
 
 VM 로그에 `Broker k3s credential upload failed with HTTP 422`가 표시되고 Broker
