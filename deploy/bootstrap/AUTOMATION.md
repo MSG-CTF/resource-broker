@@ -16,7 +16,7 @@ Content-Type: application/json
 ```json
 {
   "action": "INSTALL",
-  "bootstrap_version": "0.4.2",
+  "bootstrap_version": "0.4.3",
   "k3s_version": "v1.36.4+k3s1",
   "agent_image": "repository/agent@sha256:<64-hex-digest>"
 }
@@ -123,7 +123,7 @@ ready Azure Linux Agent and outbound HTTPS connectivity.
 
 ## Artifact versions
 
-The Docker image builds Bootstrap `0.4.2` by default. Set the Docker build arg
+The Docker image builds Bootstrap `0.4.3` by default. Set the Docker build arg
 `BOOTSTRAP_VERSION` to publish another immutable bundle. The UI/API version must
 match an artifact present in `BOOTSTRAP_ARTIFACT_DIR`; otherwise job creation
 fails before any provider-side change.
@@ -141,11 +141,15 @@ Bootstrap `0.4.2` also pins the k3s installer URL to upstream commit
 The mutable `get.k3s.io` endpoint is no longer the default. The requested k3s
 binary version still comes from `k3s_version`. See the README for provenance.
 
-The Node Agent stays at `0.2.1`; an existing Agent image digest can be reused.
-Do not republish the modified bundle as `0.4.0` or `0.4.1`: artifact URLs are immutable and
+Bootstrap `0.4.3` also pins gVisor `20261005.0`, configures the K3s runsc handler
+without replacing an existing containerd template, creates `RuntimeClass/gvisor`,
+and requires a real smoke Pod to report ready. `CHECK` repeats the smoke without
+installing packages; `REMOVE` preserves K3s and gVisor. The Node Agent stays at
+`0.2.1`; an existing Agent image digest can be reused.
+Do not replace an existing `0.4.2` bundle: artifact URLs are immutable and
 existing jobs pin their checksums. Older runner rendering stays unchanged, but
 serving an old job still requires its original bundle and configuration. Use a
-new `0.4.2` job after the earlier job reaches a terminal state.
+new `0.4.3` job after the earlier job reaches a terminal state.
 
 See [Bootstrap recovery](../../docs/BOOTSTRAP_RECOVERY.md) for rollout and manual
 checks when a VM reports `[[: not found` while the Broker still shows `RUNNING`.

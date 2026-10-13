@@ -34,6 +34,9 @@ K3S_CREDENTIAL_UPLOAD_TOKEN_FILE="${MSG_BROKER_K3S_CREDENTIAL_UPLOAD_TOKEN_FILE:
 K3S_CREDENTIAL_UPLOAD_REQUIRED="${MSG_BROKER_K3S_CREDENTIAL_UPLOAD_REQUIRED:-false}"
 K3S_CREDENTIAL_FINGERPRINT=""
 K3S_CREDENTIAL_NOT_AFTER=""
+GVISOR_RELEASE="20261005.0"
+GVISOR_REPO_SUITE="20261005"
+GVISOR_SMOKE_IMAGE="docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
 WORK_DIR=""
 
 log() {
@@ -57,8 +60,8 @@ usage() {
 Usage: sudo env <settings> bash node-agent-bootstrap.sh <action>
 
 Actions:
-  install                    Install/reconcile k3s, certificate, and Node Agent.
-  update                     Reconcile to the requested k3s and Node Agent versions.
+  install                    Install/reconcile k3s, gVisor, certificate, and Node Agent.
+  update                     Reconcile to the requested k3s and Node Agent versions and gVisor release.
   upload-k3s-credential      Upload the existing k3s admin kubeconfig to Broker.
   check                      Verify k3s, Agent certificate, and delivery state.
   remove                     Remove only the Node Agent and local certificate.
@@ -328,6 +331,154 @@ install_or_update_k3s() {
   done
   fail "k3s did not become ready within 120 seconds."
 }
+
+ensure_gvisor() {
+  local kernel_version installed_version package_version arch repo_line repo_file key_file key_temp
+  kernel_version="$(uname -r)"
+  if ! dpkg --compare-versions "${kernel_version%%-*}" ge 5.6; then
+    fail "gVisor requires Linux kernel 5.6 or newer."
+  fi
+
+  if command -v runsc >/dev/null 2>&1 \
+      && ! runsc --version | grep -Fq "${GVISOR_RELEASE}"; then
+    fail "A different gVisor release is installed; review it before changing the runtime."
+  fi
+
+  if ! { command -v runsc >/dev/null 2>&1 \
+      && command -v containerd-shim-runsc-v1 >/dev/null 2>&1 \
+      && runsc --version | grep -Fq "${GVISOR_RELEASE}"; }; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install --yes --no-install-recommends ca-certificates curl gnupg
+    key_file=/usr/share/keyrings/gvisor-archive-keyring.gpg
+    if [[ ! -s "${key_file}" ]]; then
+      key_temp="$(mktemp)"
+      curl --fail --silent --show-error --location \
+        --proto '=https' --tlsv1.2 https://gvisor.dev/archive.key \
+        | gpg --dearmor > "${key_temp}"
+      install -o root -g root -m 0644 "${key_temp}" "${key_file}"
+      rm -f -- "${key_temp}"
+    fi
+    arch="$(dpkg --print-architecture)"
+    repo_line="deb [arch=${arch} signed-by=${key_file}] https://storage.googleapis.com/gvisor/releases ${GVISOR_REPO_SUITE} main"
+    repo_file=/etc/apt/sources.list.d/msg-broker-gvisor.list
+    if [[ -e "${repo_file}" ]] && [[ "$(cat "${repo_file}")" != "${repo_line}" ]]; then
+      fail "The existing gVisor apt source differs from the pinned release."
+    fi
+    printf '%s\n' "${repo_line}" > "${repo_file}"
+    apt-get update
+    package_version="$(apt-cache madison runsc | awk -F '|' -v release="${GVISOR_RELEASE}" '
+      { gsub(/[[:space:]]/, "", $2); if ($2 == release || index($2, release "-") == 1) { print $2; exit } }
+    ')"
+    [[ -n "${package_version}" ]] || fail "Pinned gVisor package ${GVISOR_RELEASE} is unavailable."
+    apt-get install --yes --no-install-recommends "runsc=${package_version}"
+  fi
+
+  command -v runsc >/dev/null 2>&1 || fail "runsc was not installed."
+  command -v containerd-shim-runsc-v1 >/dev/null 2>&1 \
+    || fail "The gVisor containerd shim was not installed."
+  installed_version="$(runsc --version)"
+  [[ "${installed_version}" == *"${GVISOR_RELEASE}"* ]] \
+    || fail "The installed gVisor version does not match ${GVISOR_RELEASE}."
+
+  local config_dir config_version template stanza temporary_template restart_required=false
+  config_dir=/var/lib/rancher/k3s/agent/etc/containerd
+  [[ -r "${config_dir}/config.toml" ]] || fail "The generated k3s containerd config is missing."
+  config_version="$(sed -nE 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*([23]).*/\1/p' "${config_dir}/config.toml" | head -n 1)"
+  case "${config_version}" in
+    3)
+      template="${config_dir}/config-v3.toml.tmpl"
+      stanza="[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc]"
+      ;;
+    2)
+      template="${config_dir}/config.toml.tmpl"
+      stanza='[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]'
+      ;;
+    *) fail "Unsupported k3s containerd config version: ${config_version:-unknown}." ;;
+  esac
+
+  if [[ -f "${template}" ]] && grep -Eq 'containerd[.]runtimes[.].?runsc' "${template}"; then
+    grep -Fq "${stanza}" "${template}" \
+      && grep -Fq 'runtime_type = "io.containerd.runsc.v1"' "${template}" \
+      || fail "An existing runsc handler needs manual review."
+  else
+    temporary_template="$(mktemp "${config_dir}/.msg-broker-gvisor.XXXXXX")"
+    if [[ -f "${template}" ]]; then
+      cp -p -- "${template}" "${temporary_template}"
+    else
+      printf '{{ template "base" . }}\n' > "${temporary_template}"
+      chmod 0644 "${temporary_template}"
+    fi
+    printf '\n%s\n  runtime_type = "io.containerd.runsc.v1"\n' "${stanza}" >> "${temporary_template}"
+    mv -f -- "${temporary_template}" "${template}"
+    restart_required=true
+  fi
+  if ! grep -Fq "${stanza}" "${config_dir}/config.toml"; then
+    restart_required=true
+  fi
+  if [[ "${restart_required}" == "true" ]]; then
+    systemctl restart k3s
+    k3s kubectl wait --for=condition=Ready node --all --timeout=180s
+  fi
+
+  grep -Fq "${stanza}" "${config_dir}/config.toml" \
+    || fail "The generated k3s containerd config has no runsc handler."
+  local handler
+  handler="$(k3s kubectl get runtimeclass gvisor -o jsonpath='{.handler}' 2>/dev/null || true)"
+  if [[ -n "${handler}" && "${handler}" != "runsc" ]]; then
+    fail "RuntimeClass/gvisor uses an unexpected handler."
+  fi
+  if [[ -z "${handler}" ]]; then
+    printf 'apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata:\n  name: gvisor\nhandler: runsc\n' \
+      | k3s kubectl apply -f -
+  fi
+}
+
+check_gvisor() {
+  command -v runsc >/dev/null 2>&1 || fail "runsc is not installed."
+  command -v containerd-shim-runsc-v1 >/dev/null 2>&1 \
+    || fail "The gVisor containerd shim is not installed."
+  runsc --version | grep -Fq "${GVISOR_RELEASE}" \
+    || fail "The installed gVisor version does not match ${GVISOR_RELEASE}."
+  grep -Eq 'containerd[.]runtimes[.].?runsc' \
+    /var/lib/rancher/k3s/agent/etc/containerd/config.toml \
+    || fail "The generated k3s containerd config has no runsc handler."
+  local handler
+  handler="$(k3s kubectl get runtimeclass gvisor -o jsonpath='{.handler}' 2>/dev/null)" \
+    || fail "RuntimeClass/gvisor is missing."
+  [[ "${handler}" == "runsc" ]] || fail "RuntimeClass/gvisor must use runsc."
+}
+
+smoke_gvisor() (
+  local namespace="msg-broker-gvisor-smoke-$(date +%s)-${RANDOM}"
+  k3s kubectl create namespace "${namespace}"
+  trap 'k3s kubectl delete namespace "${namespace}" --wait=true --timeout=60s >/dev/null || log "gVisor smoke namespace cleanup failed: ${namespace}"' EXIT
+  cat <<EOF | k3s kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gvisor-smoke
+  namespace: ${namespace}
+spec:
+  runtimeClassName: gvisor
+  restartPolicy: Never
+  containers:
+    - name: smoke
+      image: ${GVISOR_SMOKE_IMAGE}
+      command: ["sh", "-c", "dmesg | grep -qi gvisor && sleep 300"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+EOF
+  if ! k3s kubectl wait -n "${namespace}" --for=condition=Ready pod/gvisor-smoke --timeout=180s; then
+    k3s kubectl describe pod -n "${namespace}" gvisor-smoke >&2 || true
+    exit 1
+  fi
+  k3s kubectl exec -n "${namespace}" pod/gvisor-smoke -- sh -c 'dmesg | grep -i gvisor'
+  k3s kubectl delete namespace "${namespace}" --wait=true --timeout=60s
+  trap - EXIT
+)
 
 k3s_credential_upload_is_configured() {
   [[ -n "${K3S_CREDENTIAL_UPLOAD_URL}" ]]
@@ -946,6 +1097,8 @@ reconcile() {
   validate_k3s_credential_upload_preflight
   install_dependencies
   install_or_update_k3s
+  ensure_gvisor
+  smoke_gvisor
   ensure_agent_identity
 
   local certificate_changed=false
@@ -1020,6 +1173,8 @@ check_installation() {
   if [[ "$(current_k3s_version)" != "${K3S_VERSION}" ]]; then
     fail "The installed k3s version does not match Bootstrap state."
   fi
+  check_gvisor
+  smoke_gvisor
   certificate_is_usable 0 || fail "The Agent certificate is missing or invalid."
 
   local node_name annotation applied_image

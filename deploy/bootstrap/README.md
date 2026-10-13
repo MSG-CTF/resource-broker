@@ -4,12 +4,13 @@
 맞춘다.
 
 1. 지정한 버전의 single-node k3s 설치 또는 갱신
-2. UID/GID `10001` 준비
-3. VM 내부에서 EC P-256 private key와 CSR 생성
-4. 수동 1회용 token 또는 Provider VM identity로 Agent client certificate 발급
-5. Kubernetes Node에 Broker `resource_target_id` annotation 설정
-6. RBAC과 digest 고정 Node Agent DaemonSet 적용
-7. 실제 Broker observation 전송 확인
+2. gVisor `20261005.0`과 K3s `runsc` handler, `RuntimeClass/gvisor` 구성 및 시험 Pod 확인
+3. UID/GID `10001` 준비
+4. VM 내부에서 EC P-256 private key와 CSR 생성
+5. 수동 1회용 token 또는 Provider VM identity로 Agent client certificate 발급
+6. Kubernetes Node에 Broker `resource_target_id` annotation 설정
+7. RBAC과 digest 고정 Node Agent DaemonSet 적용
+8. 실제 Broker observation 전송 확인
 
 AWS/GCP/Azure가 달라지는 부분은 이 패키지를 VM에서 실행시키는 관리면이다.
 VM 내부 설치 동작은 이 스크립트 하나를 공통으로 사용한다.
@@ -30,6 +31,25 @@ VM 내부 설치 동작은 이 스크립트 하나를 공통으로 사용한다.
 k3s는 기본 packaged component 설정으로 설치된다. 따라서 CoreDNS, Traefik,
 ServiceLB, local-path-provisioner, metrics-server Pod가 보이는 것이 정상이다.
 Bootstrap `remove`는 Runtime이 사용할 수 있는 k3s를 제거하지 않는다.
+gVisor와 `RuntimeClass/gvisor`도 남긴다. PWN Pod 사용 중에는 Runtime이 이 구성을
+참조할 수 있기 때문이다.
+
+Bootstrap `0.4.3`은 공식 gVisor `20261005.0` APT 저장소에서 `runsc`와 shim을
+설치한다. 패키지 파일은 AMD64에서 약 171 MB, ARM64에서 약 158 MB이며
+설치와 시험 Pod 실행에는 APT 저장소와 Docker Hub로 나가는 연결이 필요하다.
+기존에 다른 gVisor 릴리스가 있거나 `runsc` handler가 충돌하면 자동으로
+덮어쓰지 않고 중단한다. K3s containerd 템플릿을 처음 추가할 때 K3s를
+재시작하므로 실행 중인 workload가 잠시 영향을 받을 수 있다.
+
+`RuntimeClass/gvisor`가 존재해도 모든 Pod가 자동으로 gVisor를 쓰지는 않는다.
+PWN Pod가 `runtimeClassName: gvisor`를 지정해야 한다. Bootstrap은 시험 Pod에서
+`dmesg`의 gVisor 식별 결과까지 확인하고 임시 namespace를 정리한다. 이 결과는
+Runtime의 PSA, NetworkPolicy, metadata 접근 차단 및 PWN Provisioner 검증을
+대체하지 않는다.
+
+- gVisor 릴리스: https://github.com/google/gvisor/releases/tag/release-20261005.0
+- gVisor 설치: https://gvisor.dev/docs/user_guide/install/
+- K3s containerd 템플릿: https://docs.k3s.io/advanced#configuring-containerd
 
 ## 현재 검증 기준선
 
@@ -245,7 +265,7 @@ sudo bash deploy/bootstrap/node-agent-bootstrap.sh remove
 
 - 인증서가 갱신 기간보다 충분히 남아 있으면 `install/update`에 token이 필요 없다.
 - 인증서가 없거나 7일 안에 만료되면 새 token 파일이 필요하다.
-- `check`는 최근 10분 이내 `Delivered observation` 로그까지 검사한다.
+- `check`는 gVisor 실행 시험과 최근 10분 이내 `Delivered observation` 로그까지 검사한다.
 - `remove`는 Agent와 local certificate만 제거한다. k3s와 Runtime workload는
   보존하며, 출력된 serial의 중앙 폐기는 별도 Bootstrap Runner가 수행해야 한다.
 
@@ -254,7 +274,7 @@ sudo bash deploy/bootstrap/node-agent-bootstrap.sh remove
 Provider 관리면에 전달할 버전 고정 bundle과 checksum을 만든다.
 
 ```bash
-bash deploy/bootstrap/build-bundle.sh 0.4.2
+bash deploy/bootstrap/build-bundle.sh 0.4.3
 ```
 
 생성되는 `dist/*.tar.gz`와 `.sha256`은 artifact 저장소에 올린다. AWS SSM, GCP
