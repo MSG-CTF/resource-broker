@@ -1,8 +1,11 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from app.db.tables import ReservationTable, ResourceTargetTable
 from app.domain.enums import Architecture, ReservationStatus, RuntimeType
@@ -77,3 +80,41 @@ def test_agent_vm_report_without_operator_policy_is_not_schedulable(db_session,e
     challenge=uuid4()
     assert not query(db_session,challenge).candidates
     with pytest.raises(CandidateUnavailableError):ReservationService(db_session).create(**request(resource,challenge))
+
+
+def test_concurrent_requests_cannot_share_one_vm(db_session,session_factory,eligible_resource_target_id,monkeypatch,tmp_path):
+    resource,challenge=configure(db_session,eligible_resource_target_id,monkeypatch,tmp_path)
+    requests=[request(resource,challenge),request(resource,challenge)]
+    barrier=Barrier(2)
+
+    def reserve(body):
+        with session_factory() as session:
+            service=ReservationService(session)
+            barrier.wait(timeout=8)
+            try:
+                outcome=service.create(**body)
+                return outcome.reservation.status.value
+            except CandidateUnavailableError:
+                session.rollback()
+                return 'UNAVAILABLE'
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results=list(workers.map(reserve,requests))
+    assert sorted(results)==['HELD','UNAVAILABLE']
+    rows=db_session.scalars(select(ReservationTable).where(ReservationTable.resource_target_id==resource.resource_target_id)).all()
+    assert len(rows)==1 and rows[0].status==ReservationStatus.HELD
+
+
+def test_expired_hold_replay_does_not_take_a_replacement_vm_lease(db_session,eligible_resource_target_id,monkeypatch,tmp_path):
+    resource,challenge=configure(db_session,eligible_resource_target_id,monkeypatch,tmp_path)
+    service=ReservationService(db_session)
+    body=request(resource,challenge)
+    first=service.create(**body).reservation
+    first.expires_at=datetime.now(UTC)-timedelta(seconds=1)
+    db_session.commit()
+    replacement=service.create(**request(resource,challenge)).reservation
+    assert replacement.reservation_id!=first.reservation_id
+    assert replacement.status==ReservationStatus.HELD
+    old=service.create(**body)
+    assert old.replayed and old.reservation.status==ReservationStatus.EXPIRED
+    assert not query(db_session,challenge).candidates
