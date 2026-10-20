@@ -60,8 +60,7 @@ def credential_client(
         "https://agents.example.invalid",
     )
     monkeypatch.setenv("K3S_ADDRESS_SOURCE", "public_ip")
-    monkeypatch.setenv("RUNTIME_API_TOKEN_SECRET", RUNTIME_TOKEN_SECRET)
-    monkeypatch.setenv("RUNTIME_API_TOKEN_SUBJECT", "runtime")
+    monkeypatch.setenv("RUNTIME_API_TOKEN", RUNTIME_TOKEN_SECRET)
     monkeypatch.delenv(
         "K3S_CREDENTIAL_UPLOAD_TOKEN_SECRET",
         raising=False,
@@ -115,21 +114,8 @@ def _admin_token(client: TestClient) -> str:
 
 
 def _runtime_token(secret: str = RUNTIME_TOKEN_SECRET) -> str:
-    now = datetime.now(UTC).replace(microsecond=0)
-    return jwt.encode(
-        {
-            "iss": "msg-runtime",
-            "aud": "msg-broker-k3s-credentials",
-            "type": "runtime_access",
-            "sub": "runtime",
-            "iat": int(now.timestamp()),
-            "nbf": int(now.timestamp()) - 5,
-            "exp": int((now + timedelta(minutes=5)).timestamp()),
-            "jti": str(uuid4()),
-        },
-        secret,
-        algorithm="HS256",
-    )
+    # The deployed Runtime credential API uses an opaque service token.
+    return secret
 
 
 def _request_job(

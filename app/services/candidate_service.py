@@ -11,6 +11,7 @@ from app.repositories.reservations import (
     ReservedCapacity,
 )
 from app.services.scheduler_settings import SchedulerSettings
+from app.services.dedicated_vm import DedicatedVMPlacement
 
 
 CANDIDATE_RESULT_LIMIT = 50
@@ -39,6 +40,8 @@ class CandidateService:
         session: Session,
         settings: SchedulerSettings | None = None,
     ) -> None:
+        self._session = session
+        self._placement = DedicatedVMPlacement.from_environment()
         self._candidates = CandidateRepository(session)
         self._settings = settings or SchedulerSettings.from_environment()
 
@@ -49,6 +52,7 @@ class CandidateService:
         memory_mib: int,
         ephemeral_storage_mib: int,
         architecture: Architecture,
+        challenge_id=None,
     ) -> CandidateQueryOutcome:
         now = datetime.now(UTC)
         observed_after = now - timedelta(
@@ -69,6 +73,8 @@ class CandidateService:
         matches: list[CandidateMatch] = []
         zero = ReservedCapacity(0, 0, 0)
         for resource in resources:
+            if not self._placement.allows(resource, challenge_id) or self._placement.busy(self._session, resource, now):
+                continue
             reserved = usage_by_target.get(
                 resource.resource_target_id,
                 zero,
@@ -95,6 +101,8 @@ class CandidateService:
             )
             if fit_count < 1:
                 continue
+            if resource.runtime_type.value == "VM":
+                fit_count = 1
 
             runtime_last_seen_at = resource.runtime_last_seen_at
             runtime_observed_at = resource.runtime_observed_at

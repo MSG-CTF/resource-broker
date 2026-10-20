@@ -8,7 +8,7 @@ WORKDIR /srv/broker
 ARG BOOTSTRAP_VERSION=0.4.3
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends bash coreutils openssl tar \
+    && apt-get install --yes --no-install-recommends bash coreutils openssl openssh-client tar \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
