@@ -279,7 +279,6 @@ class GcpAdapter:
         request = self._request_factory(
             project=self._project_id,
             max_results=50,
-            return_partial_success=True,
         )
         summaries: list[ProviderInstanceSummary] = []
 
