@@ -42,7 +42,7 @@ class AgentNodeUsage(ApiSchema):
 
 
 class AgentRuntimeObservation(ApiSchema):
-    type: Literal[RuntimeType.KUBERNETES]
+    type: Literal[RuntimeType.KUBERNETES, RuntimeType.VM]
     target_id: RuntimeIdentifier
     ready: bool
 

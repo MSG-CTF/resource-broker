@@ -59,6 +59,7 @@ def query_candidates(
             memory_mib=profile.memory_mib,
             ephemeral_storage_mib=profile.ephemeral_storage_mib,
             architecture=request.architecture,
+            challenge_id=request.challenge_id,
         )
     except SchedulerConfigurationError:
         return _error(

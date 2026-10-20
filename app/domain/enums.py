@@ -29,6 +29,7 @@ class Architecture(StrEnum):
 
 class RuntimeType(StrEnum):
     KUBERNETES = "KUBERNETES"
+    VM = "VM"
 
 
 class CandidateQueryStatus(StrEnum):

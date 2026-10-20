@@ -11,6 +11,7 @@ from app.domain.observation import OBSERVATION_CLOCK_SKEW
 from app.domain.provider_state import RUNNING_PROVIDER_INSTANCE_STATE
 from app.repositories.reservations import ReservationRepository
 from app.services.scheduler_settings import SchedulerSettings
+from app.services.dedicated_vm import DedicatedVMPlacement
 
 
 class ReservationNotFoundError(LookupError):
@@ -70,6 +71,7 @@ class ReservationService:
         settings: SchedulerSettings | None = None,
     ) -> None:
         self._session = session
+        self._placement = DedicatedVMPlacement.from_environment()
         self._reservations = ReservationRepository(session)
         self._settings = settings or SchedulerSettings.from_environment()
 
@@ -160,6 +162,8 @@ class ReservationService:
             architecture=architecture,
             now=now,
         )
+        if not self._placement.allows(resource, challenge_id) or self._placement.busy(self._session, resource, now):
+            raise CandidateUnavailableError
         reserved = self._reservations.deductible_usage_for_target(
             resource_target_id=candidate_id,
             now=now,
