@@ -179,6 +179,14 @@ class ResourceTargetTable(Base):
             name="allocatable_cpu_non_negative",
         ),
         CheckConstraint(
+            "node_allocatable_cpu_millicores IS NULL OR node_allocatable_cpu_millicores >= 0",
+            name="node_allocatable_cpu_non_negative",
+        ),
+        CheckConstraint(
+            "node_allocatable_memory_mib IS NULL OR node_allocatable_memory_mib >= 0",
+            name="node_allocatable_memory_non_negative",
+        ),
+        CheckConstraint(
             (
                 "allocatable_memory_mib IS NULL "
                 "OR allocatable_memory_mib >= 0"
@@ -296,6 +304,9 @@ class ResourceTargetTable(Base):
         Integer,
         nullable=True,
     )
+    # Raw node budget, before workload requests and actual usage deductions.
+    node_allocatable_cpu_millicores: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    node_allocatable_memory_mib: Mapped[int | None] = mapped_column(Integer, nullable=True)
     allocatable_cpu_millicores: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,

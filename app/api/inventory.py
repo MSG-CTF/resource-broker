@@ -20,6 +20,7 @@ from app.schemas.inventory import (
 from app.schemas.provider_account import ErrorResponse
 from app.schemas.resource_target import ResourceCapacityResponse, ResourceUsageResponse
 from app.services.inventory_service import InventoryService
+from app.services.allocation_snapshot import allocation_snapshots
 
 
 router = APIRouter(
@@ -55,6 +56,7 @@ def _resource_response(
     resource: ResourceTargetTable,
     reservations: ReservedCapacity | None,
     container_storage: ContainerStorageUsage | None,
+    allocation: dict | None = None,
 ) -> InventoryResourceTargetResponse:
     reserved = reservations or ReservedCapacity(0, 0, 0)
     observed_container_count = (
@@ -134,12 +136,14 @@ def _resource_response(
         runtime_observed_at=resource.runtime_observed_at,
         runtime_last_seen_at=resource.runtime_last_seen_at,
         retired_at=resource.retired_at,
+        **({"resource_allocation": allocation} if allocation is not None else {}),
     )
 
 
 @router.get(
     "",
     response_model=InventoryResourceTargetListResponse,
+    response_model_exclude_unset=True,
     summary="List VM inventory with reservation-adjusted remaining capacity",
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
@@ -151,6 +155,7 @@ def list_inventory_resource_targets(
     provider: Provider | None = None,
     account_id: UUID | None = None,
     include_retired: bool = False,
+    include_allocations: bool = False,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     session: Session = Depends(get_db_session),
@@ -163,6 +168,9 @@ def list_inventory_resource_targets(
             limit=limit,
             offset=offset,
         )
+        allocations = allocation_snapshots(
+            session, tuple(resource.resource_target_id for resource in outcome.resources)
+        ) if include_allocations else {}
     except SQLAlchemyError:
         session.rollback()
         return _error_response(
@@ -181,6 +189,7 @@ def list_inventory_resource_targets(
                 resource,
                 outcome.reservations_by_target.get(resource.resource_target_id),
                 outcome.container_storage_by_target.get(resource.resource_target_id),
+                allocations.get(resource.resource_target_id),
             )
             for resource in outcome.resources
         ],

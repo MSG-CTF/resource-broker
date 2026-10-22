@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.enums import Architecture, Provider
+from app.domain.enums import Architecture, Provider, ReservationStatus
 from app.schemas.resource_target import ResourceCapacityResponse, ResourceUsageResponse
 
 
@@ -16,6 +16,29 @@ class ContainerStorageUsageResponse(InventorySchema):
     observed_container_count: int = Field(ge=0)
     total_container_count: int = Field(ge=0)
     complete: bool
+
+
+class AllocationResources(InventorySchema):
+    cpu_millicores: int | None = Field(ge=0)
+    memory_mib: int | None = Field(ge=0)
+
+
+class InventoryAllocation(InventorySchema):
+    reservation_id: UUID
+    instance_id: UUID | None
+    challenge_id: UUID
+    team_id: UUID
+    reservation_status: ReservationStatus
+    expires_at: datetime | None
+    resources: AllocationResources
+
+
+class ResourceAllocationSnapshot(InventorySchema):
+    collected_at: datetime
+    complete: bool
+    allocatable: AllocationResources
+    other_reserved: AllocationResources
+    allocations: list[InventoryAllocation]
 
 
 class InventoryResourceTargetResponse(InventorySchema):
@@ -43,6 +66,7 @@ class InventoryResourceTargetResponse(InventorySchema):
     runtime_observed_at: datetime | None
     runtime_last_seen_at: datetime | None
     retired_at: datetime | None
+    resource_allocation: ResourceAllocationSnapshot | None = None
 
 
 class InventoryResourceTargetListResponse(InventorySchema):

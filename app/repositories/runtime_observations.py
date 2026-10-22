@@ -58,6 +58,8 @@ class RuntimeObservationRepository:
         runtime_type: RuntimeType,
         runtime_target_id: str,
         runtime_ready: bool,
+        node_allocatable_cpu_millicores: int,
+        node_allocatable_memory_mib: int,
         allocatable_cpu_millicores: int,
         allocatable_memory_mib: int,
         allocatable_ephemeral_storage_mib: int,
@@ -129,6 +131,8 @@ class RuntimeObservationRepository:
         resource.runtime_type = runtime_type
         resource.target_id = runtime_target_id
         resource.ready = runtime_ready
+        resource.node_allocatable_cpu_millicores = node_allocatable_cpu_millicores
+        resource.node_allocatable_memory_mib = node_allocatable_memory_mib
         resource.allocatable_cpu_millicores = allocatable_cpu_millicores
         resource.allocatable_memory_mib = allocatable_memory_mib
         resource.allocatable_ephemeral_storage_mib = (

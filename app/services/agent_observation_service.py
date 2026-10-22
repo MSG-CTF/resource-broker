@@ -162,6 +162,8 @@ class AgentObservationService:
             runtime_type=runtime_type,
             runtime_target_id=runtime_target_id,
             runtime_ready=runtime_ready,
+            node_allocatable_cpu_millicores=node_allocatable.cpu_millicores,
+            node_allocatable_memory_mib=node_allocatable.memory_mib,
             allocatable_cpu_millicores=allocatable.cpu_millicores,
             allocatable_memory_mib=allocatable.memory_mib,
             allocatable_ephemeral_storage_mib=(
