@@ -27,12 +27,49 @@
 | `provider` | 전체 | 선택 필터: `AWS`, `GCP`, `AZURE` |
 | `account_id` | 전체 | 선택 필터: Broker 계정 UUID |
 | `include_retired` | `false` | `true`면 retired VM도 포함 |
+| `include_allocations` | `false` | `true`면 현재 페이지의 노드별 예약 원장과 전체 할당 가능 용량 포함 |
 | `limit` | `100` | 페이지 크기, 1~500 |
 | `offset` | `0` | 건너뛸 개수, 0 이상 |
 
 `total`은 필터 적용 후 전체 개수, `items`는 현재 페이지다. 전체를 받으려면 `offset`을 늘려 `items`가 끝날 때까지 조회한다. 정지·비활성·관측 지연 VM도 목록에 포함될 수 있다.
 
 #### Response
+
+`include_allocations=true`일 때 각 항목에 선택 필드 `resource_allocation`을 추가한다
+
+```json
+{
+  "resource_allocation": {
+    "collected_at": "2026-10-22T00:00:00Z",
+    "complete": true,
+    "allocatable": {"cpu_millicores": 4000, "memory_mib": 8192},
+    "other_reserved": {"cpu_millicores": 0, "memory_mib": 0},
+    "allocations": [{
+      "reservation_id": "00000000-0000-4000-8000-000000000001",
+      "instance_id": "00000000-0000-4000-8000-000000000002",
+      "challenge_id": "00000000-0000-4000-8000-000000000003",
+      "team_id": "00000000-0000-4000-8000-000000000004",
+      "reservation_status": "COMMITTED",
+      "expires_at": null,
+      "resources": {"cpu_millicores": 500, "memory_mib": 512}
+    }]
+  }
+}
+```
+
+- 원장의 만료 전 HELD와 모든 COMMITTED 예약을 같은 SQL 스냅샷에서 조회
+- 런타임 관측에 반영된 COMMITTED도 계속 표시하며 실제 반납 또는 만료 후 목록에서 제외
+- 각 예약에 기록된 CPU·메모리를 사용하며 현재 문제 릴리스의 설정으로 추정하지 않음
+- `allocatable`은 Agent가 보낸 `node_allocatable` 원본이며 실사용량과 실행 요청량 차감 전 총용량
+- 기존 `allocatable_capacity`와 `remaining_capacity`는 스케줄링 가용량으로 의미가 다르므로 예약 비율의 분모로 사용하지 않음
+- `20261022_0001` migration 후 첫 Agent 관측 전에는 총용량이 null이며 기존 가용량이나 Provider 사양으로 보간하지 않음
+- 모든 브로커 예약을 allocations에 포함하므로 other_reserved는 0이며 실제 시스템 사용량을 뜻하지 않음
+- 과거 형식의 instance_id가 UUID가 아니면 null로 반환하고 reservation_id와 예약 수치는 보존
+- 예약량과 실제 배치 가능한 잔여 자원은 다를 수 있으며 문제·팀 이름은 소비 측 백엔드가 보충
+- 기존 호출은 선택 필드를 생략하므로 응답 호환성을 유지
+
+배포 시 migration을 먼저 적용하고 앱을 교체한다
+추가한 nullable 열은 이전 앱과 호환되며 롤백 시 데이터베이스를 내리지 않고 이전 앱 이미지를 복구할 수 있다
 
 **200 OK — VM 목록 조회 성공**
 

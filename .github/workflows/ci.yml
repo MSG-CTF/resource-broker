@@ -1,0 +1,54 @@
+name: Broker CI
+
+on:
+  pull_request:
+    branches: [staging, dev]
+  push:
+    branches: [staging, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reservations-and-inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: msg_broker_test_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/msg_broker_test_ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install broker and test dependencies
+        run: python -m pip install '.[test]'
+      - name: Verify PostgreSQL reservations and authenticated inventory
+        run: python -m pytest -q
+      - name: Verify additive schema migration and rollback on the isolated database
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: |
+          python -m alembic upgrade head
+          python -m alembic downgrade 20261020_0001
+          python -m alembic upgrade head
+      - name: Build deployable broker image
+        run: docker build --label org.opencontainers.image.revision=${{ github.sha }} --tag msg-resource-broker:ci .
