@@ -1,18 +1,25 @@
 # Existing Service Account attached to the central Broker VM or workload.
 central_service_account_email = "msg-broker-controller@central-broker-project.iam.gserviceaccount.com"
 
-# Add all target GCP Project IDs. Project names and numeric project numbers are
-# not accepted here.
-target_project_ids = [
-  "target-project-01",
-  "target-project-02",
-  # ...add the remaining projects...
-]
+# Billing IAM can be enabled later by an executor with Billing IAM permissions.
+manage_billing_iam = false
 
-# Add every Cloud Billing account linked to the target projects. Multiple
-# projects can share one Billing account, so each ID is listed only once.
-target_billing_account_ids = [
-  "000000-000000-000000",
-  "111111-111111-111111",
-  # ...add the remaining Cloud Billing account IDs...
-]
+# Set false to stop problem VMs while retaining disks and static IP addresses.
+problem_vms_running = true
+
+# Use project IDs as keys. Repeat the existing Billing account ID when shared;
+# Terraform deduplicates Billing IAM grants. Each project gets four VMs in its zone.
+projects = {
+  "target-project-01" = {
+    billing_account_id = "000000-000000-000000"
+    region             = "us-central1"
+    zone               = "us-central1-a"
+  }
+
+  "target-project-02" = {
+    billing_account_id = "000000-000000-000000"
+    region             = "us-west1"
+    zone               = "us-west1-b"
+  }
+  # ...add the remaining projects...
+}

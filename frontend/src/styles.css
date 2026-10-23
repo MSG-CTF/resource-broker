@@ -116,6 +116,7 @@ main { width: min(1580px, calc(100% - 48px)); margin: 0 auto; padding: 32px 0 64
 .metric-grid small { color: #98a1b2; font-size: 11px; }
 .metric-grid-accounts { grid-template-columns: repeat(3, 1fr); }
 .metric-grid-resources { grid-template-columns: repeat(5, 1fr); }
+.metric-grid-windows { grid-template-columns: repeat(6, 1fr); }
 
 .file-navigation {
   position: relative;
@@ -259,6 +260,19 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 .notice strong { display: block; margin-bottom: 3px; }
 .notice p { margin: 0; line-height: 1.5; }
 .notice ul { margin: 6px 0 0; padding-left: 18px; }
+
+.windows-pool-list { padding: 18px; display: grid; gap: 16px; background: #f7f9fb; }
+.windows-pool-card { overflow: hidden; background: #fff; border: 1px solid #dfe5ec; border-radius: 13px; }
+.windows-pool-card > header { padding: 17px 18px 13px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.windows-pool-card > header > div { min-width: 0; display: grid; gap: 4px; }
+.windows-pool-card > header strong { color: #202a3f; font-size: 14px; }
+.windows-pool-card > header span:not(.status-badge):not(.status-dot) { color: #7c8799; font-size: 10px; }
+.windows-pool-meta { padding: 0 18px 14px; display: flex; flex-wrap: wrap; gap: 8px 18px; color: #7e8899; font-size: 10px; }
+.windows-pool-error { margin: 0 18px 14px; padding: 10px 12px; display: grid; gap: 3px; color: #a43d3d; background: #fff2f2; border-radius: 9px; font-size: 10px; }
+.windows-worker-empty { margin: 0; padding: 22px 18px; color: #8a95a7; border-top: 1px solid #edf0f4; font-size: 11px; text-align: center; }
+.windows-pool-card .table-wrap { border-top: 1px solid #edf0f4; }
+.windows-pool-card td > strong { color: #253047; }
+.worker-error { color: #b44343; }
 .notice button { padding: 2px 0; color: inherit; background: none; border: 0; font-size: 11px; font-weight: 750; }
 .notice-error { color: #8b3434; background: #fff0f0; border: 1px solid #f3cece; }
 .notice-success { color: #17694f; background: #eaf8f2; border: 1px solid #ccecdf; }
@@ -690,6 +704,7 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: space-between; color: #8a95a7; background: #e9edf1; border-top: 1px solid #dce2e8; font-size: 10px; letter-spacing: 0.04em; }
 
 @media (max-width: 1260px) {
+  .metric-grid-windows { grid-template-columns: repeat(3, 1fr); }
   .vm-list-header { display: none; }
   .vm-list-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

@@ -74,6 +74,17 @@ export function listProviderAccounts() {
   return request("/v1/admin/provider-accounts");
 }
 
+export function listWindowsWorkerPools({ signal } = {}) {
+  return request("/v1/admin/windows-worker-pools", { signal });
+}
+
+export function createWindowsWorkerPool(payload) {
+  return request("/v1/admin/windows-worker-pools", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function listResourceTargets({ provider = "" } = {}) {
   const query = new URLSearchParams();
   if (provider) query.set("provider", provider);

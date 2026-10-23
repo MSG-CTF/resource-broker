@@ -44,6 +44,20 @@ class ReservationStatus(StrEnum):
     EXPIRED = "EXPIRED"
 
 
+class WindowsWorkerStatus(StrEnum):
+    PROVISIONING = "PROVISIONING"
+    READY = "READY"
+    LEASED = "LEASED"
+    RECREATING = "RECREATING"
+    FAILED = "FAILED"
+
+
+class WindowsWorkerLeaseStatus(StrEnum):
+    LEASED = "LEASED"
+    COMPLETED = "COMPLETED"
+    EXPIRED = "EXPIRED"
+
+
 class ReleaseReason(StrEnum):
     RUNTIME_CREATE_FAILED = "RUNTIME_CREATE_FAILED"
     DEPLOYED_SPEC_MISMATCH = "DEPLOYED_SPEC_MISMATCH"

@@ -5,6 +5,7 @@ import {
   clearAdminToken,
   createBootstrapJob,
   createProviderAccount,
+  createWindowsWorkerPool,
   deleteProviderAccount,
   getGcpCreditEstimate,
   getAdminToken,
@@ -12,6 +13,7 @@ import {
   listProviderAccounts,
   listResourceTargetContainers,
   listResourceTargets,
+  listWindowsWorkerPools,
   loginAdmin,
   setAdminToken,
   syncProviderAccount,
@@ -119,6 +121,11 @@ const STATUS_LABELS = {
   AVAILABLE: "API 정상",
   UNAVAILABLE: "API 장애",
   UNKNOWN: "확인 전",
+  PROVISIONING: "준비 중",
+  READY: "사용 가능",
+  LEASED: "사용 중",
+  RECREATING: "재생성 중",
+  FAILED: "오류",
 };
 
 function createEmptyForm(provider = "GCP") {
@@ -371,16 +378,16 @@ function CandidateRegistrationControl({
 
 function statusTone(value) {
   if (
-    ["VALID", "SUFFICIENT", "AVAILABLE", "RUNNING"].includes(
+    ["VALID", "SUFFICIENT", "AVAILABLE", "RUNNING", "READY"].includes(
       String(value).toUpperCase(),
     )
   ) {
     return "positive";
   }
-  if (["INVALID", "INSUFFICIENT", "UNAVAILABLE"].includes(value)) {
+  if (["INVALID", "INSUFFICIENT", "UNAVAILABLE", "FAILED"].includes(value)) {
     return "negative";
   }
-  if (value === "TERMINATED") return "neutral";
+  if (["TERMINATED", "LEASED"].includes(value)) return "neutral";
   return "pending";
 }
 
@@ -1656,12 +1663,229 @@ function ResourceInventory({
   );
 }
 
+const EMPTY_WINDOWS_POOL_FORM = {
+  displayName: "",
+  projectId: "",
+  zone: "",
+  managedInstanceGroup: "",
+};
+
+function WindowsWorkerRegisterForm({ onCreated }) {
+  const [form, setForm] = useState(EMPTY_WINDOWS_POOL_FORM);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  function updateField(event) {
+    const { name, value } = event.target;
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const pool = await createWindowsWorkerPool({
+        project_id: form.projectId.trim(),
+        zone: form.zone.trim(),
+        managed_instance_group: form.managedInstanceGroup.trim(),
+        display_name: form.displayName.trim() || null,
+      });
+      setForm(EMPTY_WINDOWS_POOL_FORM);
+      await onCreated(pool);
+    } catch (requestError) {
+      setError(requestError);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="panel register-panel" aria-labelledby="windows-register-title">
+      <div className="panel-heading">
+        <div>
+          <span className="eyebrow">GCP managed instance group</span>
+          <h2 id="windows-register-title">Worker Pool 등록</h2>
+        </div>
+      </div>
+      <ErrorBanner error={error} onClose={() => setError(null)} />
+      <form className="register-form" onSubmit={handleSubmit}>
+        <label>
+          <span>표시 이름 (선택)</span>
+          <input
+            name="displayName"
+            value={form.displayName}
+            placeholder="예: Windows 경기장"
+            onChange={updateField}
+          />
+        </label>
+        <label>
+          <span>GCP 프로젝트 ID</span>
+          <input
+            name="projectId"
+            value={form.projectId}
+            placeholder="예: windows-worker-project"
+            required
+            onChange={updateField}
+          />
+        </label>
+        <label>
+          <span>Zone</span>
+          <input
+            name="zone"
+            value={form.zone}
+            placeholder="예: us-central1-a"
+            required
+            onChange={updateField}
+          />
+        </label>
+        <label>
+          <span>MIG 이름</span>
+          <input
+            name="managedInstanceGroup"
+            value={form.managedInstanceGroup}
+            placeholder="예: windows-workers"
+            required
+            onChange={updateField}
+          />
+          <small>등록 후 Broker가 MIG health 상태와 인스턴스를 동기화합니다.</small>
+        </label>
+        <button className="button button-primary button-block" type="submit" disabled={submitting}>
+          {submitting ? "등록 중..." : "Worker Pool 등록"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function WindowsWorkerManagement({ pools, loading, onCreated, onRefresh }) {
+  const workers = pools.flatMap((pool) => pool.workers);
+  const count = (status) => workers.filter((worker) => worker.status === status).length;
+  const metrics = [
+    ["전체 Worker", workers.length, "등록된 MIG 인스턴스"],
+    ["사용 가능", count("READY"), "READY"],
+    ["사용 중", count("LEASED"), "LEASED"],
+    ["재생성 중", count("RECREATING"), "RECREATING"],
+    ["준비 중", count("PROVISIONING"), "PROVISIONING"],
+    ["오류", count("FAILED"), "FAILED"],
+  ];
+
+  return (
+    <>
+      <div className="view-title">
+        <div>
+          <span className="eyebrow">Windows worker control plane</span>
+          <h1>Windows Worker</h1>
+        </div>
+        <span>MIG 상태 10초마다 자동 갱신</span>
+      </div>
+
+      <section className="metric-grid metric-grid-windows" aria-label="Windows Worker 요약">
+        {metrics.map(([label, value, help]) => (
+          <article key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+            <small>{help}</small>
+          </article>
+        ))}
+      </section>
+
+      <div className="workspace-grid">
+        <WindowsWorkerRegisterForm onCreated={onCreated} />
+
+        <section className="panel windows-pools-panel" aria-labelledby="windows-pools-title">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">Worker inventory</span>
+              <h2 id="windows-pools-title">등록된 Worker Pool</h2>
+            </div>
+            <button className="button button-ghost" type="button" onClick={onRefresh}>
+              새로고침
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="loading-state">Windows Worker 목록을 불러오는 중입니다...</div>
+          ) : pools.length === 0 ? (
+            <div className="empty-state">
+              <span>W</span>
+              <h3>등록된 Worker Pool이 없습니다.</h3>
+              <p>왼쪽에서 GCP MIG를 등록하면 Worker 상태가 여기에 표시됩니다.</p>
+            </div>
+          ) : (
+            <div className="windows-pool-list">
+              {pools.map((pool) => (
+                <article className="windows-pool-card" key={pool.pool_id}>
+                  <header>
+                    <div>
+                      <strong>{pool.display_name || pool.managed_instance_group}</strong>
+                      <span>{pool.project_id} · {pool.zone}</span>
+                    </div>
+                    <StatusBadge
+                      value={pool.error_code ? "FAILED" : pool.last_synced_at ? "READY" : "PROVISIONING"}
+                      label={pool.error_code ? "동기화 오류" : pool.last_synced_at ? "동기화됨" : "동기화 대기"}
+                    />
+                  </header>
+                  <div className="windows-pool-meta">
+                    <span>MIG <code>{pool.managed_instance_group}</code></span>
+                    <span>최근 동기화 {formatDate(pool.last_synced_at)}</span>
+                  </div>
+                  {pool.error_message && (
+                    <div className="windows-pool-error" role="alert">
+                      <strong>{pool.error_code}</strong>
+                      <span>{pool.error_message}</span>
+                    </div>
+                  )}
+
+                  {pool.workers.length === 0 ? (
+                    <p className="windows-worker-empty">아직 동기화된 Worker가 없습니다.</p>
+                  ) : (
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Worker</th>
+                            <th>Private IP</th>
+                            <th>상태</th>
+                            <th>Instance ID</th>
+                            <th>최근 확인</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pool.workers.map((worker) => (
+                            <tr key={worker.worker_id}>
+                              <td><strong>{worker.instance_name}</strong></td>
+                              <td><code>{worker.private_ip || "미할당"}</code></td>
+                              <td><StatusBadge value={worker.status} /></td>
+                              <td><code>{worker.instance_id || "미수집"}</code></td>
+                              <td className="date-cell">
+                                <span>{formatDate(worker.last_seen_at)}</span>
+                                {worker.error_message && <span className="worker-error">{worker.error_message}</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </>
+  );
+}
+
 function AdminDashboard({ onLogout }) {
   const [activeView, setActiveView] = useState("accounts");
   const [accounts, setAccounts] = useState([]);
   const [resources, setResources] = useState([]);
+  const [windowsPools, setWindowsPools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [resourceLoading, setResourceLoading] = useState(true);
+  const [windowsLoading, setWindowsLoading] = useState(true);
   const [resourceProvider, setResourceProvider] = useState("");
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
@@ -1705,6 +1929,21 @@ function AdminDashboard({ onLogout }) {
     }
   }, [resourceProvider]);
 
+  const loadWindowsPools = useCallback(async (showLoading = true) => {
+    if (showLoading) setWindowsLoading(true);
+    try {
+      const response = await listWindowsWorkerPools();
+      setWindowsPools(response.items);
+      setConnected(true);
+      setError(null);
+    } catch (requestError) {
+      setConnected(false);
+      setError(requestError);
+    } finally {
+      if (showLoading) setWindowsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts]);
@@ -1712,6 +1951,16 @@ function AdminDashboard({ onLogout }) {
   useEffect(() => {
     loadResources();
   }, [loadResources]);
+
+  useEffect(() => {
+    loadWindowsPools();
+  }, [loadWindowsPools]);
+
+  useEffect(() => {
+    if (activeView !== "windows") return undefined;
+    const intervalId = window.setInterval(() => loadWindowsPools(false), 10_000);
+    return () => window.clearInterval(intervalId);
+  }, [activeView, loadWindowsPools]);
 
   const metrics = useMemo(() => {
     const healthy = accounts.filter(
@@ -1751,6 +2000,11 @@ function AdminDashboard({ onLogout }) {
   async function handleCreated(account) {
     setNotice(`${account.display_name || account.external_account_id} 계정을 등록했습니다.`);
     await loadAccounts();
+  }
+
+  async function handleWindowsPoolCreated(pool) {
+    setNotice(`${pool.display_name || pool.managed_instance_group} Worker Pool을 등록했습니다.`);
+    await loadWindowsPools(false);
   }
 
   async function handleVerify(account) {
@@ -1982,6 +2236,18 @@ function AdminDashboard({ onLogout }) {
               <small>{metrics.resourceTotal} resources</small>
             </span>
           </button>
+          <button
+            className={`file-tab ${activeView === "windows" ? "is-active" : ""}`}
+            type="button"
+            aria-current={activeView === "windows" ? "page" : undefined}
+            onClick={() => setActiveView("windows")}
+          >
+            <span className="file-icon" aria-hidden="true" />
+            <span>
+              <strong>Windows Worker</strong>
+              <small>{windowsPools.reduce((sum, pool) => sum + pool.workers.length, 0)} workers</small>
+            </span>
+          </button>
         </nav>
 
         <div className="view-surface">
@@ -2038,7 +2304,7 @@ function AdminDashboard({ onLogout }) {
                 </section>
               </div>
             </>
-          ) : (
+          ) : activeView === "resources" ? (
             <>
               <div className="view-title">
                 <div>
@@ -2067,6 +2333,13 @@ function AdminDashboard({ onLogout }) {
                 onRefresh={loadResources}
               />
             </>
+          ) : (
+            <WindowsWorkerManagement
+              pools={windowsPools}
+              loading={windowsLoading}
+              onCreated={handleWindowsPoolCreated}
+              onRefresh={() => loadWindowsPools()}
+            />
           )}
         </div>
       </main>

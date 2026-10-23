@@ -33,6 +33,8 @@ from app.domain.enums import (
     ReleaseReason,
     ReservationStatus,
     RuntimeType,
+    WindowsWorkerLeaseStatus,
+    WindowsWorkerStatus,
 )
 
 
@@ -972,4 +974,208 @@ class RuntimeContainerTable(Base):
 
     resource_target: Mapped[ResourceTargetTable] = relationship(
         back_populates="runtime_containers",
+    )
+
+
+class WindowsWorkerPoolTable(Base):
+    __tablename__ = "windows_worker_pools"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "zone",
+            "managed_instance_group",
+            name="uq_windows_worker_pools_gcp_mig",
+        ),
+        Index("ix_windows_worker_pools_last_synced_at", "last_synced_at"),
+    )
+
+    pool_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    project_id: Mapped[str] = mapped_column(String(63), nullable=False)
+    zone: Mapped[str] = mapped_column(String(128), nullable=False)
+    managed_instance_group: Mapped[str] = mapped_column(
+        String(63),
+        nullable=False,
+    )
+    display_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    workers: Mapped[list[WindowsWorkerTable]] = relationship(
+        back_populates="pool",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class WindowsWorkerTable(Base):
+    __tablename__ = "windows_workers"
+    __table_args__ = (
+        UniqueConstraint(
+            "pool_id",
+            "instance_name",
+            name="uq_windows_workers_pool_instance_name",
+        ),
+        Index("ix_windows_workers_status", "status"),
+    )
+
+    worker_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    pool_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey("windows_worker_pools.pool_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    instance_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    instance_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    private_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[WindowsWorkerStatus] = mapped_column(
+        _enum_type(WindowsWorkerStatus, "windows_worker_status"),
+        nullable=False,
+        default=WindowsWorkerStatus.PROVISIONING,
+        server_default=WindowsWorkerStatus.PROVISIONING.value,
+    )
+    recycle_request_id: Mapped[UUID | None] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        nullable=True,
+    )
+    recycle_source_instance_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    recycle_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    recreate_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    ready_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    pool: Mapped[WindowsWorkerPoolTable] = relationship(
+        back_populates="workers",
+    )
+    leases: Mapped[list[WindowsWorkerLeaseTable]] = relationship(
+        back_populates="worker",
+    )
+
+
+class WindowsWorkerLeaseTable(Base):
+    __tablename__ = "windows_worker_leases"
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_windows_worker_leases_idempotency_key",
+        ),
+        Index("ix_windows_worker_leases_status_expires", "status", "expires_at"),
+        Index(
+            "uq_windows_worker_leases_active_worker",
+            "worker_id",
+            unique=True,
+            postgresql_where=text("status = 'LEASED'"),
+        ),
+    )
+
+    lease_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    worker_id: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        ForeignKey("windows_workers.worker_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    idempotency_key: Mapped[UUID] = mapped_column(
+        PostgreSqlUuid(as_uuid=True),
+        nullable=False,
+    )
+    status: Mapped[WindowsWorkerLeaseStatus] = mapped_column(
+        _enum_type(
+            WindowsWorkerLeaseStatus,
+            "windows_worker_lease_status",
+        ),
+        nullable=False,
+        default=WindowsWorkerLeaseStatus.LEASED,
+        server_default=WindowsWorkerLeaseStatus.LEASED.value,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    worker: Mapped[WindowsWorkerTable] = relationship(
+        back_populates="leases",
     )
