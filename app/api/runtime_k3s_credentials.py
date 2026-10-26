@@ -38,6 +38,7 @@ def _error(status_code: int, code: str, message: str) -> JSONResponse:
 def _response(credential) -> RuntimeK3sCredentialResponse:
     return RuntimeK3sCredentialResponse(
         resource_target_id=credential.resource_target_id,
+        target_id=credential.target_id,
         source_bootstrap_job_id=credential.source_job_id,
         server_url=credential.server_url,
         kubeconfig_base64=credential.kubeconfig_base64,

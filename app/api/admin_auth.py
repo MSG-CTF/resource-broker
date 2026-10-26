@@ -23,7 +23,7 @@ router = APIRouter(
 admin_bearer = HTTPBearer(auto_error=False)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class AdminAuthHttpError(Exception):
     status_code: int
     code: str
