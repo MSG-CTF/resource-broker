@@ -222,6 +222,7 @@ def test_bootstrap_uploads_encrypted_credential_and_runtime_pulls_it(
     )
     assert target is not None
     target.public_ip = "192.0.2.10"
+    target.target_id = "99f2f3b0-495a-4a7a-9e84-b4b35a7d21b8"
     db_session.commit()
     admin_token = _admin_token(credential_client)
 
@@ -317,6 +318,8 @@ def test_bootstrap_uploads_encrypted_credential_and_runtime_pulls_it(
     assert len(response["items"]) == 1
     item = response["items"][0]
     assert item["resource_target_id"] == str(eligible_resource_target_id)
+    assert item["target_id"] == "99f2f3b0-495a-4a7a-9e84-b4b35a7d21b8"
+    assert item["target_id"] != item["resource_target_id"]
     assert item["source_bootstrap_job_id"] == str(job_id)
     assert base64.b64decode(item["kubeconfig_base64"]).decode() == kubeconfig
 
@@ -325,4 +328,28 @@ def test_bootstrap_uploads_encrypted_credential_and_runtime_pulls_it(
         headers={"Authorization": f"Bearer {_runtime_token()}"},
     )
     assert single.status_code == 200
+    assert single.json()["target_id"] == item["target_id"]
     assert single.json()["kubeconfig_base64"] == item["kubeconfig_base64"]
+
+    # Identity is the current observed node, not a snapshot of the credential
+    # upload. An unobserved node must not fall back to the Broker resource ID.
+    target.target_id = None
+    db_session.commit()
+    unobserved = credential_client.get(
+        f"/v1/runtime/k3s-credentials/{eligible_resource_target_id}",
+        headers={"Authorization": f"Bearer {runtime_token}"},
+    )
+    assert unobserved.json()["target_id"] is None
+
+    target.target_id = "bc53bb1f-baa7-4d2e-9036-1b6d17f9302d"
+    db_session.commit()
+    refreshed = credential_client.get(
+        "/v1/runtime/k3s-credentials",
+        headers={"Authorization": f"Bearer {runtime_token}"},
+    )
+    assert refreshed.json()["items"][0]["target_id"] == (
+        "bc53bb1f-baa7-4d2e-9036-1b6d17f9302d"
+    )
+    assert refreshed.json()["items"][0]["kubeconfig_base64"] == (
+        item["kubeconfig_base64"]
+    )
