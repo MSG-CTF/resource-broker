@@ -28,6 +28,18 @@ Scheduler가 특정 VM에 workload를 배치할 때 사용하는 ID의 의미는
 - `candidate_id`: Broker의 `resource_target_id`. 인증정보 API 경로에 사용한다.
 - `target_id`: Kubernetes Node UID. 인증정보 API 경로에 사용하지 않는다.
 
+목록/단건 인증정보 응답에도 `target_id`가 포함된다. Runtime은 kubeconfig를
+받은 뒤 실제 노드 UID가 이 값과 일치하는지 확인하고, 생성·조회·삭제용
+registry 키로 **이 `target_id`**를 등록한다. `resource_target_id`를 실행용
+키로 대신 사용하지 않는다. 두 ID를 응답에서 함께 받으므로 수동 매핑은
+필요하지 않다.
+
+`target_id`는 인증정보 업로드 당시 값이 아니라 현재 Kubernetes 관측값이다.
+노드가 아직 관측되지 않았거나 Kubernetes 대상이 아니면 `null`이다. 이때는
+등록을 보류하고 노드 관측 후 다시 가져온다. 인증정보 조회 및 페이지 커서는
+계속 `resource_target_id`를 사용한다. 기존 소비자는 추가 응답 필드를 허용해야
+하며 `schema_version=1`의 기존 인증정보 필드는 유지된다.
+
 ## Base URL
 
 - 외부 Gateway: `https://broker.mjsec.kr/api`
@@ -82,6 +94,7 @@ curl --fail-with-body --silent --show-error \
     {
       "schema_version": 1,
       "resource_target_id": "00000000-0000-4000-8000-000000000001",
+      "target_id": "00000000-0000-4000-8000-000000000003",
       "source_bootstrap_job_id": "00000000-0000-4000-8000-000000000002",
       "server_url": "https://192.0.2.10:6443",
       "kubeconfig_base64": "<base64-kubeconfig-yaml>",
@@ -155,12 +168,18 @@ def load_kubernetes_clients() -> dict[str, client.ApiClient]:
         page = response.json()
 
         for item in page["items"]:
+            target_id = item.get("target_id")
+            if not target_id:
+                continue  # Wait for a Kubernetes node observation; do not guess.
             kubeconfig = yaml.safe_load(
                 base64.b64decode(item["kubeconfig_base64"])
             )
-            clients[item["resource_target_id"]] = (
-                config.new_client_from_config_dict(kubeconfig)
-            )
+            api_client = config.new_client_from_config_dict(kubeconfig)
+            nodes = client.CoreV1Api(api_client).list_node(_request_timeout=10).items
+            if len(nodes) != 1 or nodes[0].metadata.uid != target_id:
+                api_client.close()
+                raise ValueError("Broker target_id differs from the credential's node")
+            clients[target_id] = api_client
 
         after = page["next_cursor"]
         if after is None:
@@ -169,7 +188,7 @@ def load_kubernetes_clients() -> dict[str, client.ApiClient]:
 
 api_clients = load_kubernetes_clients()
 apps = client.AppsV1Api(
-    api_clients["00000000-0000-4000-8000-000000000001"]
+    api_clients["00000000-0000-4000-8000-000000000003"]
 )
 ```
 
