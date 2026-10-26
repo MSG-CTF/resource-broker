@@ -39,7 +39,7 @@ class WindowsRuntimeRepository:
             .join(connection, connection.resource_target_id == target.resource_target_id)
             .join(account, account.account_id == target.account_id)
             .where(
-                target.provider == Provider.AZURE,
+                account.provider == Provider.AZURE,
                 target.os_type == "WINDOWS",
                 target.enabled.is_(True),
                 account.enabled.is_(True),

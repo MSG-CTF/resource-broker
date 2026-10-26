@@ -32,7 +32,8 @@ class WindowsRuntimeService:
 
     def _target(self, resource_target_id: UUID, *, for_update: bool = False):
         target = self.repository.target(resource_target_id, for_update=for_update)
-        if target is None or target.provider != Provider.AZURE or target.os_type != "WINDOWS":
+        account = self.repository.account(target.account_id) if target is not None else None
+        if target is None or account is None or account.provider != Provider.AZURE or target.os_type != "WINDOWS":
             raise WindowsRuntimeError("WINDOWS_VM_NOT_FOUND", "The Azure Windows VM was not found.")
         return target
 
