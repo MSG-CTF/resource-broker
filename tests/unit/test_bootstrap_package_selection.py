@@ -8,7 +8,7 @@ import unittest
 
 class PackageSelectionTests(unittest.TestCase):
     def test_version_selection_drains_producer_under_pipefail(self):
-        script = Path(__file__).parent / "bootstrap" / "node-agent-bootstrap.sh"
+        script = Path(__file__).resolve().parents[2] / "deploy" / "bootstrap" / "node-agent-bootstrap.sh"
         source = script.read_text()
         selection = re.search(r'package_version="\$\((apt-cache madison runsc .*?)\)"', source, re.S)
         self.assertIsNotNone(selection)
