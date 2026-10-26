@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Header, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -11,6 +11,7 @@ from app.adapters.gcp_billing import (
     GcpBillingDependencyError,
     GcpBillingUnavailableError,
 )
+from app.adapters.azure import AzureAdapterError
 from app.api.admin_auth import require_admin
 from app.db.session import get_db_session
 from app.db.tables import ProviderAccountTable, ResourceTargetTable
@@ -34,6 +35,8 @@ from app.schemas.provider_account import (
     ProviderScopeResult,
 )
 from app.schemas.resource_target import ResourceCapacityResponse
+from app.schemas.azure_user_login import AzureBrowserLoginRequest, AzureUserLoginResponse
+from app.services.azure_user_login import AzureBrowserLoginNotConfiguredError
 from app.services.gcp_credit_service import (
     GcpCreditAccountNotFoundError,
     GcpCreditRequiresGcpAccountError,
@@ -69,6 +72,63 @@ def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
         status_code=status_code,
         content=body.model_dump(mode="json"),
     )
+
+
+@router.post(
+    "/{account_id}/azure-login",
+    response_model=AzureUserLoginResponse,
+    summary="Connect a Microsoft browser login to an Azure account",
+    responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 404: {"model": ErrorResponse},
+               409: {"model": ErrorResponse}, 500: {"model": ErrorResponse},
+               502: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def connect_azure_user_login(
+    account_id: UUID,
+    request: AzureBrowserLoginRequest,
+    azure_access_token: str | None = Header(default=None, alias="X-Azure-Access-Token"),
+    session: Session = Depends(get_db_session),
+) -> AzureUserLoginResponse | Response:
+    if azure_access_token is None:
+        return _error_response(400, "AZURE_ACCESS_TOKEN_REQUIRED", "Complete Microsoft browser login first.")
+    try:
+        return AzureUserLoginResponse(**ProviderAccountService(session).connect_azure_user_login(
+            account_id, azure_access_token, request.expires_on
+        ))
+    except ProviderAccountNotFoundError:
+        return _error_response(404, "ACCOUNT_NOT_FOUND", "The provider account was not found.")
+    except InvalidProviderAccountConfigError:
+        return _error_response(409, "AZURE_USER_LOGIN_NOT_ENABLED", "This account does not use Azure user login.")
+    except AzureBrowserLoginNotConfiguredError:
+        return _error_response(503, "AZURE_BROWSER_LOGIN_NOT_CONFIGURED", "Configure the central Microsoft application Client ID first.")
+    except ValueError:
+        return _error_response(400, "INVALID_AZURE_ACCESS_TOKEN", "The Azure access token is invalid or expired.")
+    except AzureAdapterError as error:
+        return _error_response(502, error.error_code, error.public_message)
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(500, "DATABASE_ERROR", "The Azure account could not be read.")
+
+
+@router.get(
+    "/{account_id}/azure-login",
+    response_model=AzureUserLoginResponse,
+    summary="Read Microsoft browser login settings and connection status",
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse},
+               409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+def get_azure_user_login(
+    account_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> AzureUserLoginResponse | Response:
+    try:
+        return AzureUserLoginResponse(**ProviderAccountService(session).azure_user_login_status(account_id))
+    except ProviderAccountNotFoundError:
+        return _error_response(404, "ACCOUNT_NOT_FOUND", "The provider account was not found.")
+    except InvalidProviderAccountConfigError:
+        return _error_response(409, "AZURE_USER_LOGIN_NOT_ENABLED", "This account does not use Azure user login.")
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(500, "DATABASE_ERROR", "The Azure account could not be read.")
 
 
 ACCOUNT_RESPONSE_MODELS = {

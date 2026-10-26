@@ -30,6 +30,7 @@ from app.adapters.azure import (
     AzureDependencyError,
     AzurePermissionError,
     AzureSubscriptionNotFoundError,
+    AzureUserLoginRequiredError,
 )
 from app.adapters.gcp import (
     GcpAdapter,
@@ -54,6 +55,7 @@ from app.repositories.provider_accounts import (
     ResourceTargetRepository,
 )
 from app.repositories.reservations import ReservationRepository
+from app.services import azure_user_login
 
 
 GcpAdapterFactory = Callable[[str], GcpAdapter]
@@ -202,6 +204,9 @@ class ProviderAccountService:
             Provider.AWS: "env://AWS_FEDERATION_HUB_ROLE_ARN",
             Provider.AZURE: "federated://gcp-attached-service-account",
         }.get(provider)
+        if provider is Provider.AZURE and provider_config.get("auth_method") in ("USER_BROWSER", "USER_DEVICE_CODE"):
+            auth_method = "USER_BROWSER"
+            credential_reference = None
         account = ProviderAccountTable(
             provider=provider,
             external_account_id=external_account_id,
@@ -222,6 +227,35 @@ class ProviderAccountService:
 
     def list_accounts(self) -> tuple[ProviderAccountTable, ...]:
         return self._accounts.list_all()
+
+    def _azure_user_login_account(self, account_id: UUID) -> ProviderAccountTable:
+        account = self._get_account(account_id)
+        if account.provider is not Provider.AZURE or account.provider_config.get("auth_method") not in ("USER_BROWSER", "USER_DEVICE_CODE"):
+            raise InvalidProviderAccountConfigError(
+                "This account does not use Azure user login."
+            )
+        return account
+
+    def connect_azure_user_login(
+        self, account_id: UUID, access_token: str, expires_on: int
+    ) -> dict[str, Any]:
+        account = self._azure_user_login_account(account_id)
+        response = azure_user_login.connect(
+            account_id, account.external_account_id,
+            self._subscription_ids(account), access_token, expires_on,
+        )
+        account.auth_method = "USER_BROWSER"
+        account.provider_config = {**account.provider_config, "auth_method": "USER_BROWSER"}
+        try:
+            self._session.commit()
+        except Exception:
+            azure_user_login.disconnect(account_id)
+            raise
+        return response
+
+    def azure_user_login_status(self, account_id: UUID) -> dict[str, Any]:
+        account = self._azure_user_login_account(account_id)
+        return azure_user_login.login_status(account_id, account.external_account_id)
 
     def verify(self, account_id: UUID) -> VerificationOutcome:
         account = self._get_account(account_id)
@@ -248,6 +282,7 @@ class ProviderAccountService:
         )
         self._accounts.delete(account)
         self._session.commit()
+        azure_user_login.disconnect(account_id)
         return DeleteOutcome(
             account_id=account_id,
             deleted_resource_count=deleted_resource_count,
@@ -710,22 +745,25 @@ class ProviderAccountService:
         tuple[ProviderInstanceSummary, ...],
     ]:
         tenant_id = account.external_account_id
-        client_id = self._azure_client_id(account)
-        account.auth_method = "GOOGLE_OIDC_CLIENT_ASSERTION"
-        account.credential_reference = (
-            "federated://gcp-attached-service-account"
-        )
+        user_login = account.provider_config.get("auth_method") in ("USER_BROWSER", "USER_DEVICE_CODE")
+        client_id = None if user_login else self._azure_client_id(account)
+        account.auth_method = "USER_BROWSER" if user_login else "GOOGLE_OIDC_CLIENT_ASSERTION"
+        account.credential_reference = None if user_login else "federated://gcp-attached-service-account"
         inspections: list[ProviderScopeInspection] = []
         instances: list[ProviderInstanceSummary] = []
 
         for subscription_id in subscription_ids:
             try:
-                subscription_instances = self._azure_adapter_factory(
-                    tenant_id,
-                    client_id,
-                    subscription_id,
-                ).list_instances()
+                if user_login:
+                    credential = azure_user_login.user_credential(account.account_id, tenant_id)
+                    adapter = AzureAdapter.from_user_credential(subscription_id, credential)
+                else:
+                    adapter = self._azure_adapter_factory(tenant_id, client_id, subscription_id)
+                subscription_instances = adapter.list_instances()
             except AzureAdapterError as error:
+                if user_login and isinstance(error, AzureAuthenticationError):
+                    azure_user_login.disconnect(account.account_id)
+                    error = AzureUserLoginRequiredError(subscription_id)
                 inspections.append(
                     ProviderScopeInspection(
                         provider_scope_id=subscription_id,
@@ -766,6 +804,7 @@ class ProviderAccountService:
                 AwsAuthenticationError.error_code,
                 GcpAuthenticationError.error_code,
                 AzureAuthenticationError.error_code,
+                AzureUserLoginRequiredError.error_code,
             }
             & error_codes
         )

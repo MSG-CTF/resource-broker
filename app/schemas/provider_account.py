@@ -174,13 +174,22 @@ class AwsAccountConfig(AwsAccountCreateConfig):
 
 
 class AzureAccountConfig(ApiSchema):
-    client_id: AzureUuid
+    auth_method: Literal["GOOGLE_OIDC_CLIENT_ASSERTION", "USER_BROWSER", "USER_DEVICE_CODE"] = (
+        "GOOGLE_OIDC_CLIENT_ASSERTION"
+    )
+    client_id: AzureUuid | None = None
     subscription_ids: list[AzureUuid] = Field(min_length=1)
 
     @field_validator("client_id")
     @classmethod
-    def normalize_client_id(cls, value: str) -> str:
-        return value.lower()
+    def normalize_client_id(cls, value: str | None) -> str | None:
+        return value.lower() if value is not None else None
+
+    @model_validator(mode="after")
+    def require_federated_client_id(self) -> "AzureAccountConfig":
+        if self.auth_method == "GOOGLE_OIDC_CLIENT_ASSERTION" and not self.client_id:
+            raise ValueError("Client ID is required for federated authentication.")
+        return self
 
     @field_validator("subscription_ids")
     @classmethod
