@@ -104,19 +104,22 @@ AWS Access Key를 전달받지 않는다.
 
 ## Azure Provider
 
-Azure는 Tenant 하나당 Entra App Registration 하나를 등록하고, 여러
-Subscription ID를 조회 범위로 사용할 수 있다.
+Azure는 Tenant별 Entra App Registration 또는 사용자 할당 관리 ID를 사용한다.
+관리 ID는 리소스 그룹 Reader 권한으로 지정한 그룹만 조회할 수 있다.
 
 - 인증: GCP metadata Google OIDC → Entra Federated Credential → Azure 임시 토큰
 - audience: `api://AzureADTokenExchange`
-- 조회 권한: 각 Subscription의 `Reader`
-- 저장 설정: Tenant ID, Application Client ID, Subscription ID만 저장
+- 조회 권한: Entra 앱은 각 Subscription의 `Reader`, 관리 ID는 지정한 각
+  Resource Group의 `Reader`
+- 저장 설정: Tenant ID, Client ID, Subscription ID 및 관리 ID 방식의
+  Resource Group 이름만 저장
 - 금지: Azure Client Secret을 `.env`, DB, 이미지에 저장하지 않음
 - Bootstrap: 대상 Resource Group의 제한된 Managed Run Command 권한과
   `msg-broker-bootstrap=enabled` tag 사용
 
-Azure 계정 등록 후 Verify/Sync를 실행하면 기존 계정의 인증 메타데이터도
-Google OIDC 방식으로 갱신된다.
+Entra 앱 연동 계정은 Verify/Sync에서 Google OIDC를 사용한다. 사용자 로그인 계정은
+토큰 만료 후 재연결이 필요하다. 관리 ID로 전환할 때는 기존 계정을 삭제하지 말고
+[설정 절차](docs/AZURE_MANAGED_IDENTITY.md)를 따른다.
 
 ## 로컬 개발 실행
 

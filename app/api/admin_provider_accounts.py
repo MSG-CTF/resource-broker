@@ -19,6 +19,7 @@ from app.domain.enums import Provider
 from app.schemas.provider_account import (
     AwsAccountResponse,
     AzureAccountResponse,
+    AzureManagedIdentityRequest,
     ErrorResponse,
     GcpAccountResponse,
     GcpCreditEstimateResponse,
@@ -129,6 +130,50 @@ def get_azure_user_login(
     except SQLAlchemyError:
         session.rollback()
         return _error_response(500, "DATABASE_ERROR", "The Azure account could not be read.")
+
+
+@router.put(
+    "/{account_id}/azure-managed-identity",
+    response_model=ProviderAccountSyncResponse,
+    summary="Switch an Azure account to resource-group managed identity federation",
+    responses={
+        400: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+        502: {"model": ProviderAccountSyncResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def configure_azure_managed_identity(
+    account_id: UUID,
+    request: AzureManagedIdentityRequest,
+    session: Session = Depends(get_db_session),
+) -> ProviderAccountSyncResponse | Response:
+    try:
+        outcome = ProviderAccountService(session).configure_azure_managed_identity(
+            account_id,
+            client_id=request.client_id,
+            resource_groups=[scope.model_dump() for scope in request.resource_groups],
+        )
+    except ProviderAccountNotFoundError:
+        return _error_response(404, "PROVIDER_ACCOUNT_NOT_FOUND", "The provider account was not found.")
+    except InvalidProviderAccountConfigError as error:
+        return _error_response(400, "INVALID_PROVIDER_ACCOUNT_CONFIG", str(error))
+    except ProviderAccountHasActiveBootstrapJobsError:
+        return _error_response(409, "PROVIDER_ACCOUNT_HAS_ACTIVE_BOOTSTRAP_JOBS", "The account has active Bootstrap jobs.")
+    except ProviderAccountHasActiveReservationsError:
+        return _error_response(409, "PROVIDER_ACCOUNT_HAS_ACTIVE_RESERVATIONS", "The account has active Scheduler reservations.")
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(500, "DATABASE_ERROR", "The Azure account could not be updated.")
+
+    response = _sync_response(outcome)
+    if not outcome.success:
+        return JSONResponse(status_code=502, content=response.model_dump(mode="json"))
+    return response
 
 
 ACCOUNT_RESPONSE_MODELS = {

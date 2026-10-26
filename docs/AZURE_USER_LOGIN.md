@@ -77,6 +77,8 @@ one API process, for at most one hour or the token's expiry, whichever is first.
 No refresh token, password, token file, or token DB storage is introduced.
 Reconnect after expiry or restart. Multiple API replicas are not supported by
 this in-memory credential store. No DB schema migration is required.
+For unattended inventory sync with resource-group permissions, use
+[Azure managed identity federation](AZURE_MANAGED_IDENTITY.md).
 
 Manual verification: configure the central app, register without per-account
 Client ID, open browser login, complete Microsoft MFA/consent, and check actual

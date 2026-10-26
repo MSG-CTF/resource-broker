@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AzureWindowsVm from "./AzureWindowsVm.jsx";
 import AzureAccountLogin from "./AzureAccountLogin.jsx";
+import AzureManagedIdentitySetup from "./AzureManagedIdentitySetup.jsx";
 
 import {
   ApiError,
@@ -165,7 +166,9 @@ function accountScopes(account) {
     case "AWS":
       return config.regions || [];
     case "AZURE":
-      return config.subscription_ids || [];
+      return config.resource_groups?.map(
+        (group) => `${group.subscription_id}/${group.name}`,
+      ) || config.subscription_ids || [];
     default:
       return [];
   }
@@ -681,6 +684,7 @@ function AccountTable({
   onCredit,
   onDelete,
   onAzureLogin,
+  onAzureManagedIdentity,
 }) {
   if (accounts.length === 0) {
     return (
@@ -766,6 +770,11 @@ function AccountTable({
                     {account.provider === "AZURE" && ["USER_BROWSER", "USER_DEVICE_CODE"].includes(account.config?.auth_method) && (
                       <button className="button button-secondary" type="button" disabled={Boolean(actionState)} onClick={() => onAzureLogin(account)}>
                         Microsoft 계정 연결
+                      </button>
+                    )}
+                    {account.provider === "AZURE" && (
+                      <button className="button button-secondary" type="button" disabled={Boolean(actionState)} onClick={() => onAzureManagedIdentity(account)}>
+                        자동 연동 설정
                       </button>
                     )}
                     <button
@@ -1953,6 +1962,7 @@ function AdminDashboard({ onLogout }) {
   const [creditLoading, setCreditLoading] = useState(false);
   const [creditError, setCreditError] = useState(null);
   const [azureLoginAccount, setAzureLoginAccount] = useState(null);
+  const [azureManagedAccount, setAzureManagedAccount] = useState(null);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -2109,6 +2119,16 @@ function AdminDashboard({ onLogout }) {
     setAzureLoginAccount(null);
     await handleSync(account);
   }, [handleSync]);
+
+  async function handleAzureManagedSaved(account, result) {
+    setAzureManagedAccount(null);
+    setSyncResult(result);
+    setSyncAccountName(account.display_name || account.external_account_id);
+    setNotice(`${result.discovered_count}개의 Azure VM을 자동 연동했습니다.`);
+    await loadAccounts();
+    await loadResources();
+    setActiveView("resources");
+  }
 
   async function refreshCreditEstimate(account) {
     setCreditError(null);
@@ -2373,6 +2393,7 @@ function AdminDashboard({ onLogout }) {
                       onCredit={handleCredit}
                       onDelete={handleDelete}
                       onAzureLogin={setAzureLoginAccount}
+                      onAzureManagedIdentity={setAzureManagedAccount}
                     />
                   )}
                 </section>
@@ -2437,6 +2458,15 @@ function AdminDashboard({ onLogout }) {
           account={azureLoginAccount}
           onClose={() => setAzureLoginAccount(null)}
           onConnected={handleAzureConnected}
+        />
+      )}
+
+      {azureManagedAccount && (
+        <AzureManagedIdentitySetup
+          key={azureManagedAccount.account_id}
+          account={azureManagedAccount}
+          onClose={() => setAzureManagedAccount(null)}
+          onSaved={handleAzureManagedSaved}
         />
       )}
 

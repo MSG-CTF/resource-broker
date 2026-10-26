@@ -150,6 +150,13 @@ export function getAzureUserLogin(accountId, { signal } = {}) {
   return request(`/v1/admin/provider-accounts/${encodeURIComponent(accountId)}/azure-login`, { signal });
 }
 
+export function configureAzureManagedIdentity(accountId, payload) {
+  return request(`/v1/admin/provider-accounts/${encodeURIComponent(accountId)}/azure-managed-identity`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function verifyProviderAccount(accountId) {
   return request(`/v1/admin/provider-accounts/${accountId}/verify`, {
     method: "POST",
