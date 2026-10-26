@@ -15,7 +15,9 @@ from app.api.admin_auth import (
 from app.api.admin_provider_accounts import router as admin_accounts_router
 from app.api.agent_enrollments import router as agent_enrollments_router
 from app.api.agent_observations import router as agent_observations_router
+from app.api.inventory_auth import InventoryAuthHttpError
 from app.api.reservations import router as reservations_router
+from app.api.runtime_auth import RuntimeAuthHttpError
 from app.api.scheduler_auth import (
     SchedulerAuthHttpError,
     scheduler_auth_http_error_handler,
@@ -27,6 +29,19 @@ ADMIN_ID = "test-admin"
 ADMIN_PASSWORD = "test-admin-password"
 ADMIN_SECRET = "a" * 32
 SCHEDULER_TOKEN = "s" * 40
+
+
+@pytest.mark.parametrize("error_type", [AdminAuthHttpError, SchedulerAuthHttpError,
+                                       InventoryAuthHttpError, RuntimeAuthHttpError])
+def test_auth_errors_support_framework_traceback_cleanup(error_type) -> None:
+    error = error_type(status_code=401, code="TOKEN_REQUIRED", message="Token required")
+    try:
+        raise error
+    except error_type as caught:
+        caught.__traceback__ = None
+        assert caught.__traceback__ is None
+        assert caught.status_code == 401
+        assert caught.code == "TOKEN_REQUIRED"
 
 
 @pytest.fixture

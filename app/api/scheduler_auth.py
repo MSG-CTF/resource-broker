@@ -20,7 +20,7 @@ class SchedulerPrincipal:
     subject: str = "scheduler"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class SchedulerAuthHttpError(Exception):
     status_code: int
     code: str
