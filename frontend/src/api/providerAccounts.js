@@ -85,11 +85,12 @@ export function createWindowsWorkerPool(payload) {
   });
 }
 
-export function listResourceTargets({ provider = "" } = {}) {
+export function listResourceTargets({ provider = "", accountId = "", signal } = {}) {
   const query = new URLSearchParams();
   if (provider) query.set("provider", provider);
+  if (accountId) query.set("account_id", accountId);
   query.set("limit", "500");
-  return request(`/v1/admin/resource-targets?${query.toString()}`);
+  return request(`/v1/admin/resource-targets?${query.toString()}`, { signal });
 }
 
 export function updateResourceTargetCandidateRegistration(
@@ -134,6 +135,19 @@ export function createProviderAccount(payload) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function connectAzureUserLogin(accountId, accessToken, expiresOn, { signal } = {}) {
+  return request(`/v1/admin/provider-accounts/${encodeURIComponent(accountId)}/azure-login`, {
+    method: "POST",
+    headers: { "X-Azure-Access-Token": accessToken },
+    body: JSON.stringify({ expires_on: expiresOn }),
+    signal,
+  });
+}
+
+export function getAzureUserLogin(accountId, { signal } = {}) {
+  return request(`/v1/admin/provider-accounts/${encodeURIComponent(accountId)}/azure-login`, { signal });
 }
 
 export function verifyProviderAccount(accountId) {

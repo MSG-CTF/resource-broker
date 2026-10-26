@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import AzureWindowsVm from "./AzureWindowsVm.jsx";
+import AzureAccountLogin from "./AzureAccountLogin.jsx";
+
 import {
   ApiError,
   clearAdminToken,
@@ -91,14 +94,6 @@ const PROVIDER_DEFINITIONS = {
     accountHelp: "Azure 계정을 대표하는 Microsoft Entra Tenant ID입니다.",
     configFields: [
       {
-        name: "clientId",
-        configKey: "client_id",
-        label: "Client ID",
-        placeholder: "00000000-0000-0000-0000-000000000000",
-        help: "브로커 워크로드와 연결할 애플리케이션 Client ID입니다.",
-        kind: "text",
-      },
-      {
         name: "subscriptionIds",
         configKey: "subscription_ids",
         label: "Subscription IDs",
@@ -156,7 +151,10 @@ function buildProviderConfig(provider, configValues) {
     if (field.required === false && !value) return [];
     return [[field.configKey, value]];
   });
-  return Object.fromEntries(entries);
+  return {
+    ...Object.fromEntries(entries),
+    ...(provider === "AZURE" ? { auth_method: "USER_BROWSER" } : {}),
+  };
 }
 
 function accountScopes(account) {
@@ -271,6 +269,10 @@ const CANDIDATE_REASON_LABELS = {
   ALLOCATABLE_CAPACITY_NOT_OBSERVED: "배치 가능량 미수집",
 };
 
+function isAzureWindowsVm(resource) {
+  return resource.provider === "AZURE" && resource.os_type === "WINDOWS";
+}
+
 function candidateRegistrationReasons(resource) {
   const reasons = [];
   if (resource.account_enabled === false) {
@@ -280,6 +282,7 @@ function candidateRegistrationReasons(resource) {
   if (resource.status !== "RUNNING") {
     reasons.push("PROVIDER_INSTANCE_NOT_RUNNING");
   }
+  if (isAzureWindowsVm(resource)) return reasons;
   if (!resource.runtime?.ready) reasons.push("RUNTIME_NOT_READY");
   if (!resource.architecture) reasons.push("ARCHITECTURE_NOT_OBSERVED");
   if (!resource.runtime?.type || !resource.runtime?.target_id) {
@@ -336,7 +339,7 @@ function CandidateRegistrationControl({
   const registered = resource.enabled;
   const label = registered
     ? eligible
-      ? "후보 등록됨"
+      ? (isAzureWindowsVm(resource) ? "Windows VM 등록됨" : "후보 등록됨")
       : "등록됨 · 현재 사용 불가"
     : eligible
       ? "후보 등록 가능"
@@ -355,6 +358,9 @@ function CandidateRegistrationControl({
         <span className="candidate-registration-reason" title={reasonText}>
           {reasonText}
         </span>
+      )}
+      {isAzureWindowsVm(resource) && (
+        <span className="candidate-registration-reason">Node Agent 없이 등록 · 실행 상태는 Runtime 연동 후 표시</span>
       )}
       <button
         className={`button ${registered ? "button-ghost" : "button-primary"}`}
@@ -615,7 +621,9 @@ function RegisterForm({ onCreated }) {
 
         <div className="config-divider">
           <span>{definition.shortLabel} 설정</span>
-          <small>provider_config에 저장되는 Provider 전용 필드입니다.</small>
+          <small>{form.provider === "AZURE"
+            ? "등록 후 Microsoft 계정을 연결하면 해당 계정 권한으로 VM을 조회합니다."
+            : "클라우드에서 조회할 범위를 입력하세요."}</small>
         </div>
 
         {definition.configFields.map((field) => (
@@ -672,6 +680,7 @@ function AccountTable({
   onSync,
   onCredit,
   onDelete,
+  onAzureLogin,
 }) {
   if (accounts.length === 0) {
     return (
@@ -754,6 +763,11 @@ function AccountTable({
                 </td>
                 <td>
                   <div className="row-actions">
+                    {account.provider === "AZURE" && ["USER_BROWSER", "USER_DEVICE_CODE"].includes(account.config?.auth_method) && (
+                      <button className="button button-secondary" type="button" disabled={Boolean(actionState)} onClick={() => onAzureLogin(account)}>
+                        Microsoft 계정 연결
+                      </button>
+                    )}
                     <button
                       className="button button-secondary"
                       type="button"
@@ -1100,11 +1114,15 @@ function SyncResult({ result, accountName }) {
 }
 
 function ResourceInventory({
+  windowsOnly = false,
+  accounts,
   resources,
   loading,
   provider,
+  accountId,
   actionState,
   onProviderChange,
+  onAccountChange,
   onCandidateRegistrationChange,
   onRefresh,
 }) {
@@ -1138,7 +1156,7 @@ function ResourceInventory({
   }, [selectedResource]);
 
   useEffect(() => {
-    if (!selectedResource) {
+    if (!selectedResource || isAzureWindowsVm(selectedResource)) {
       setBootstrapJobs([]);
       setBootstrapError(null);
       setBootstrapLoading(false);
@@ -1203,7 +1221,7 @@ function ResourceInventory({
   }
 
   useEffect(() => {
-    if (!selectedResource) {
+    if (!selectedResource || isAzureWindowsVm(selectedResource)) {
       setContainers([]);
       setContainersError(null);
       setContainersObservedAt(null);
@@ -1251,39 +1269,29 @@ function ResourceInventory({
           ? "AWS Region"
           : "Scope ID";
   const visibleResources = useMemo(() => {
+    const inventory = windowsOnly ? resources.filter(isAzureWindowsVm) : resources;
     if (registrationFilter === "registered") {
-      return resources.filter((resource) => resource.enabled);
+      return inventory.filter((resource) => resource.enabled);
     }
     if (registrationFilter === "unregistered") {
-      return resources.filter((resource) => !resource.enabled);
+      return inventory.filter((resource) => !resource.enabled);
     }
-    return resources;
-  }, [registrationFilter, resources]);
+    return inventory;
+  }, [registrationFilter, resources, windowsOnly]);
 
   return (
     <section className="panel resources-panel" aria-labelledby="inventory-title">
       <div className="panel-heading resources-heading">
         <div>
           <span className="eyebrow">Database snapshot</span>
-          <h2 id="inventory-title">전체 VM 인벤토리</h2>
+          <h2 id="inventory-title">{windowsOnly ? "Windows VM 인벤토리" : "전체 VM 인벤토리"}</h2>
           <p>
-            Cloud API를 다시 호출하지 않고 Broker DB 값을 표시합니다. Scheduler
-            배치 가능량은 Pod requests 기준과 VM 실사용 기준 중 작은 값입니다.
+            {windowsOnly
+              ? "Azure가 Windows로 확인한 VM입니다. Node Agent 설치 없이 등록할 수 있습니다."
+              : "Cloud API를 다시 호출하지 않고 Broker DB 값을 표시합니다. Scheduler 배치 가능량은 Pod requests 기준과 VM 실사용 기준 중 작은 값입니다."}
           </p>
         </div>
         <div className="inventory-controls">
-          <select
-            value={provider}
-            onChange={(event) => onProviderChange(event.target.value)}
-            aria-label="클라우드 필터"
-          >
-            <option value="">전체 클라우드</option>
-            {PROVIDER_ORDER.map((item) => (
-              <option key={item} value={item}>
-                {PROVIDER_DEFINITIONS[item].label}
-              </option>
-            ))}
-          </select>
           <select
             value={registrationFilter}
             onChange={(event) => setRegistrationFilter(event.target.value)}
@@ -1299,15 +1307,52 @@ function ResourceInventory({
         </div>
       </div>
 
+      {!windowsOnly && <div className="inventory-provider-filters" role="group" aria-label="클라우드 필터">
+        {["", ...PROVIDER_ORDER].map((value) => (
+          <button
+            className={provider === value ? "is-active" : ""}
+            type="button"
+            key={value}
+            aria-pressed={provider === value}
+            onClick={() => onProviderChange(value)}
+          >
+            {value ? PROVIDER_DEFINITIONS[value].shortLabel : "전체"}
+          </button>
+        ))}
+      </div>}
+
+      <div className="inventory-provider-filters inventory-account-filters" role="group" aria-label="계정 표시 이름 필터">
+        <span>계정</span>
+        <button className={!accountId ? "is-active" : ""} type="button" aria-pressed={!accountId} onClick={() => onAccountChange("")}>
+          전체 계정
+        </button>
+        {accounts.filter((account) => !provider || account.provider === provider).map((account) => (
+          <button
+            className={accountId === account.account_id ? "is-active" : ""}
+            type="button"
+            key={account.account_id}
+            aria-pressed={accountId === account.account_id}
+            title={`${PROVIDER_DEFINITIONS[account.provider].shortLabel} · ${account.external_account_id}`}
+            onClick={() => onAccountChange(account.account_id)}
+          >
+            {account.display_name || account.external_account_id}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <div className="loading-state">VM 목록을 불러오는 중입니다...</div>
       ) : resources.length === 0 ? (
         <div className="empty-inline">
-          저장된 VM이 없습니다. 계정을 동기화하면 이곳에 표시됩니다.
+          {provider || accountId
+            ? "선택한 클라우드·계정에 해당하는 VM이 없습니다."
+            : "저장된 VM이 없습니다. 계정을 동기화하면 이곳에 표시됩니다."}
         </div>
       ) : visibleResources.length === 0 ? (
         <div className="empty-inline">
-          현재 등록 상태 필터에 해당하는 VM이 없습니다.
+          {windowsOnly
+            ? "선택한 조건의 Windows VM이 없습니다. Azure 계정을 동기화하면 OS 정보와 목록이 갱신됩니다."
+            : "현재 등록 상태 필터에 해당하는 VM이 없습니다."}
         </div>
       ) : (
         <div className="vm-list">
@@ -1389,15 +1434,19 @@ function ResourceInventory({
                 </div>
                 <div className="capacity-list-arrow" aria-hidden="true">→</div>
                 <div className="vm-list-capacity">
-                  <CapacitySummary
+                  {isAzureWindowsVm(resource) ? (
+                    <p>Windows 전용 VM<br />한 VM당 한 익스</p>
+                  ) : <CapacitySummary
                     capacity={resource.allocatable_capacity}
                     label="Scheduler 배치 가능량(예약 전)"
                     variant="allocatable"
                     description="Node allocatable에서 Pod requests를 뺀 값과 Provider 전체 사양에서 VM 실제 사용량을 뺀 값 중 더 작은 값입니다. Broker reservation은 아직 차감하지 않았습니다."
-                  />
+                  />}
                 </div>
                 <div className="vm-list-capacity">
-                  <UsageSummary usage={resource.runtime?.usage} />
+                  {isAzureWindowsVm(resource)
+                    ? <p>Node Agent 설치 불필요</p>
+                    : <UsageSummary usage={resource.runtime?.usage} />}
                 </div>
 
                 <section className="vm-list-network">
@@ -1480,6 +1529,9 @@ function ResourceInventory({
                 </div>
               </dl>
 
+              {isAzureWindowsVm(selectedResource) ? (
+                <p>Windows VM은 Node Agent 없이 등록합니다. 익스 실행·완료 상태와 초기화는 Runtime 연동 후 확인합니다.</p>
+              ) : <>
               <section className="bootstrap-jobs" aria-labelledby="bootstrap-jobs-title">
                 <header className="bootstrap-jobs-header">
                   <div>
@@ -1655,6 +1707,7 @@ function ResourceInventory({
                   </div>
                 )}
               </section>
+              </>}
             </div>
           </section>
         </div>
@@ -1775,7 +1828,7 @@ function WindowsWorkerManagement({ pools, loading, onCreated, onRefresh }) {
       <div className="view-title">
         <div>
           <span className="eyebrow">Windows worker control plane</span>
-          <h1>Windows Worker</h1>
+          <h1>GCP Windows Worker</h1>
         </div>
         <span>MIG 상태 10초마다 자동 갱신</span>
       </div>
@@ -1883,10 +1936,12 @@ function AdminDashboard({ onLogout }) {
   const [accounts, setAccounts] = useState([]);
   const [resources, setResources] = useState([]);
   const [windowsPools, setWindowsPools] = useState([]);
+  const [windowsPoolsSupported, setWindowsPoolsSupported] = useState(false);
   const [loading, setLoading] = useState(true);
   const [resourceLoading, setResourceLoading] = useState(true);
   const [windowsLoading, setWindowsLoading] = useState(true);
   const [resourceProvider, setResourceProvider] = useState("");
+  const [resourceAccountId, setResourceAccountId] = useState("");
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -1897,6 +1952,7 @@ function AdminDashboard({ onLogout }) {
   const [creditEstimate, setCreditEstimate] = useState(null);
   const [creditLoading, setCreditLoading] = useState(false);
   const [creditError, setCreditError] = useState(null);
+  const [azureLoginAccount, setAzureLoginAccount] = useState(null);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -1912,31 +1968,39 @@ function AdminDashboard({ onLogout }) {
     }
   }, []);
 
-  const loadResources = useCallback(async () => {
+  const loadResources = useCallback(async ({ signal } = {}) => {
     setResourceLoading(true);
     try {
       const response = await listResourceTargets({
         provider: resourceProvider,
+        accountId: resourceAccountId,
+        signal,
       });
       setResources(response.items);
       setConnected(true);
       setError(null);
     } catch (requestError) {
+      if (requestError.name === "AbortError") return;
       setConnected(false);
       setError(requestError);
     } finally {
-      setResourceLoading(false);
+      if (!signal?.aborted) setResourceLoading(false);
     }
-  }, [resourceProvider]);
+  }, [resourceProvider, resourceAccountId]);
 
   const loadWindowsPools = useCallback(async (showLoading = true) => {
     if (showLoading) setWindowsLoading(true);
     try {
       const response = await listWindowsWorkerPools();
       setWindowsPools(response.items);
+      setWindowsPoolsSupported(true);
       setConnected(true);
       setError(null);
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 404) {
+        setWindowsPoolsSupported(false);
+        return;
+      }
       setConnected(false);
       setError(requestError);
     } finally {
@@ -1949,7 +2013,9 @@ function AdminDashboard({ onLogout }) {
   }, [loadAccounts]);
 
   useEffect(() => {
-    loadResources();
+    const controller = new AbortController();
+    loadResources({ signal: controller.signal });
+    return () => controller.abort();
   }, [loadResources]);
 
   useEffect(() => {
@@ -1969,19 +2035,6 @@ function AdminDashboard({ onLogout }) {
         account.permission_status === "SUFFICIENT" &&
         account.provider_api_status === "AVAILABLE",
     ).length;
-    const running = resources.filter(
-      (resource) => resource.status?.toUpperCase() === "RUNNING",
-    ).length;
-    const registered = resources.filter((resource) => resource.enabled).length;
-    const totalCpuMillicores = resources.reduce(
-      (sum, resource) =>
-        sum + (resource.provider_capacity?.cpu_millicores || 0),
-      0,
-    );
-    const totalMemoryMib = resources.reduce(
-      (sum, resource) => sum + (resource.provider_capacity?.memory_mib || 0),
-      0,
-    );
     return {
       total: accounts.length,
       healthy,
@@ -1989,17 +2042,16 @@ function AdminDashboard({ onLogout }) {
         (sum, account) => sum + accountScopes(account).length,
         0,
       ),
-      running,
-      registered,
       resourceTotal: resources.length,
-      totalCpuMillicores,
-      totalMemoryMib,
     };
   }, [accounts, resources]);
 
   async function handleCreated(account) {
     setNotice(`${account.display_name || account.external_account_id} 계정을 등록했습니다.`);
     await loadAccounts();
+    if (account.provider === "AZURE" && ["USER_BROWSER", "USER_DEVICE_CODE"].includes(account.config?.auth_method)) {
+      setAzureLoginAccount(account);
+    }
   }
 
   async function handleWindowsPoolCreated(pool) {
@@ -2027,7 +2079,7 @@ function AdminDashboard({ onLogout }) {
     }
   }
 
-  async function handleSync(account) {
+  const handleSync = useCallback(async (account) => {
     if (!ACTIVE_PROVIDERS.has(account.provider)) return;
     setError(null);
     setNotice(null);
@@ -2051,7 +2103,12 @@ function AdminDashboard({ onLogout }) {
     } finally {
       setActionState(null);
     }
-  }
+  }, [loadAccounts, loadResources]);
+
+  const handleAzureConnected = useCallback(async (account) => {
+    setAzureLoginAccount(null);
+    await handleSync(account);
+  }, [handleSync]);
 
   async function refreshCreditEstimate(account) {
     setCreditError(null);
@@ -2237,6 +2294,22 @@ function AdminDashboard({ onLogout }) {
             </span>
           </button>
           <button
+            className={`file-tab ${activeView === "azure-windows" ? "is-active" : ""}`}
+            type="button"
+            aria-current={activeView === "azure-windows" ? "page" : undefined}
+            onClick={() => {
+              setResourceProvider("AZURE");
+              setResourceAccountId("");
+              setActiveView("azure-windows");
+            }}
+          >
+            <span className="file-icon" aria-hidden="true" />
+            <span>
+              <strong>Windows VM</strong>
+              <small>Azure Windows VM 관리</small>
+            </span>
+          </button>
+          {windowsPoolsSupported && <button
             className={`file-tab ${activeView === "windows" ? "is-active" : ""}`}
             type="button"
             aria-current={activeView === "windows" ? "page" : undefined}
@@ -2244,10 +2317,10 @@ function AdminDashboard({ onLogout }) {
           >
             <span className="file-icon" aria-hidden="true" />
             <span>
-              <strong>Windows Worker</strong>
+              <strong>GCP Windows Worker</strong>
               <small>{windowsPools.reduce((sum, pool) => sum + pool.workers.length, 0)} workers</small>
             </span>
-          </button>
+          </button>}
         </nav>
 
         <div className="view-surface">
@@ -2299,6 +2372,7 @@ function AdminDashboard({ onLogout }) {
                       onSync={handleSync}
                       onCredit={handleCredit}
                       onDelete={handleDelete}
+                      onAzureLogin={setAzureLoginAccount}
                     />
                   )}
                 </section>
@@ -2314,25 +2388,38 @@ function AdminDashboard({ onLogout }) {
                 <span>Broker DB snapshot</span>
               </div>
 
-              <section className="metric-grid metric-grid-resources" aria-label="VM 요약">
-                <article><span>조회된 VM</span><strong>{metrics.resourceTotal}</strong><small>현재 필터 기준</small></article>
-                <article><span>실행 중 VM</span><strong>{metrics.running}</strong><small>provider state RUNNING</small></article>
-                <article><span>후보 등록 VM</span><strong>{metrics.registered}</strong><small>enabled=true</small></article>
-                <article><span>전체 CPU</span><strong>{formatCpu(metrics.totalCpuMillicores)}</strong><small>provider capacity 합계</small></article>
-                <article><span>전체 Memory</span><strong>{formatMib(metrics.totalMemoryMib)}</strong><small>provider capacity 합계</small></article>
-              </section>
-
               <SyncResult result={syncResult} accountName={syncAccountName} />
               <ResourceInventory
+                accounts={accounts}
                 resources={resources}
                 loading={resourceLoading}
                 provider={resourceProvider}
+                accountId={resourceAccountId}
                 actionState={actionState}
-                onProviderChange={setResourceProvider}
+                onProviderChange={(provider) => {
+                  setResourceProvider(provider);
+                  setResourceAccountId("");
+                }}
+                onAccountChange={setResourceAccountId}
                 onCandidateRegistrationChange={handleCandidateRegistration}
                 onRefresh={loadResources}
               />
             </>
+          ) : activeView === "azure-windows" ? (
+            <AzureWindowsVm>
+              <ResourceInventory
+                windowsOnly
+                accounts={accounts}
+                resources={resources}
+                loading={resourceLoading}
+                provider="AZURE"
+                accountId={resourceAccountId}
+                actionState={actionState}
+                onAccountChange={setResourceAccountId}
+                onCandidateRegistrationChange={handleCandidateRegistration}
+                onRefresh={loadResources}
+              />
+            </AzureWindowsVm>
           ) : (
             <WindowsWorkerManagement
               pools={windowsPools}
@@ -2343,6 +2430,15 @@ function AdminDashboard({ onLogout }) {
           )}
         </div>
       </main>
+
+      {azureLoginAccount && (
+        <AzureAccountLogin
+          key={azureLoginAccount.account_id}
+          account={azureLoginAccount}
+          onClose={() => setAzureLoginAccount(null)}
+          onConnected={handleAzureConnected}
+        />
+      )}
 
       {creditAccount && (
         <GcpCreditModal

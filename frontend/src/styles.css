@@ -115,7 +115,6 @@ main { width: min(1580px, calc(100% - 48px)); margin: 0 auto; padding: 32px 0 64
 .metric-grid strong { display: block; margin: 10px 0 3px; color: #15213a; font-size: 32px; letter-spacing: -0.04em; }
 .metric-grid small { color: #98a1b2; font-size: 11px; }
 .metric-grid-accounts { grid-template-columns: repeat(3, 1fr); }
-.metric-grid-resources { grid-template-columns: repeat(5, 1fr); }
 .metric-grid-windows { grid-template-columns: repeat(6, 1fr); }
 
 .file-navigation {
@@ -289,6 +288,13 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 .resources-heading p { margin: 7px 0 0; color: #8791a3; font-size: 11px; }
 .inventory-controls { display: flex; align-items: center; gap: 8px; }
 .inventory-controls select { min-width: 180px; }
+.inventory-provider-filters { padding: 14px 25px; display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #e9edf2; }
+.inventory-provider-filters button { min-width: 65px; padding: 8px 16px; color: #758196; background: #f7f9fc; border: 1px solid #e0e6ef; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.inventory-provider-filters button:hover { color: #2b61c9; background: #edf3ff; }
+.inventory-provider-filters button.is-active { color: #fff; background: #2d68e6; border-color: #2d68e6; }
+.inventory-provider-filters button:focus-visible { outline: 3px solid #93b2f2; outline-offset: 3px; }
+.inventory-account-filters { align-items: center; background: #fafbfd; }
+.inventory-account-filters > span { margin-right: 4px; color: #8791a3; font-size: 11px; font-weight: 700; }
 .sync-metrics { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid #e9edf2; }
 .sync-metrics div { padding: 18px 24px; border-right: 1px solid #e9edf2; }
 .sync-metrics div:last-child { border-right: 0; }
@@ -492,6 +498,10 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
   border-bottom: 1px solid #e7ebf0;
 }
 .resource-modal-header h2 { margin: 3px 0 0; color: #17233c; font-size: 22px; letter-spacing: -0.035em; }
+.azure-login-modal { max-width: 580px; }
+.azure-login-body { display: grid; gap: 16px; }
+.azure-login-body p { line-height: 1.6; }
+.azure-login-body small { color: #667085; line-height: 1.6; }
 .resource-modal-close {
   width: 36px;
   height: 36px;
@@ -733,8 +743,9 @@ footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: s
   .login-shell { padding: 16px; }
   .login-card { padding: 27px 22px; }
   main { width: min(100% - 24px, 1580px); padding-top: 20px; }
-  .file-navigation { padding: 0 7px; gap: 4px; }
+  .file-navigation { padding: 0 7px; gap: 4px; overflow-x: auto; }
   .file-tab { min-width: 0; min-height: 56px; padding: 10px 12px; flex: 1; }
+  .file-navigation .file-tab { min-width: 130px; flex: 0 0 auto; }
   .file-tab.is-active { min-height: 61px; }
   .file-tab strong { font-size: 12px; }
   .file-tab small { font-size: 8px; }
