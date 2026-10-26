@@ -368,7 +368,7 @@ ensure_gvisor() {
     printf '%s\n' "${repo_line}" > "${repo_file}"
     apt-get update
     package_version="$(apt-cache madison runsc | awk -F '|' -v release="${GVISOR_RELEASE}" '
-      { gsub(/[[:space:]]/, "", $2); if ($2 == release || index($2, release "-") == 1) { print $2; exit } }
+      !found { gsub(/[[:space:]]/, "", $2); if ($2 == release || index($2, release "-") == 1) { print $2; found=1 } }
     ')"
     [[ -n "${package_version}" ]] || fail "Pinned gVisor package ${GVISOR_RELEASE} is unavailable."
     apt-get install --yes --no-install-recommends "runsc=${package_version}"
