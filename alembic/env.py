@@ -5,7 +5,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.db.base import Base
-from app.db import tables
+from app.db import tables, windows_runtime
 
 
 config = context.config

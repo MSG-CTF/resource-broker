@@ -1,0 +1,168 @@
+Windows VM Runtime 연동 가이드 (RDP)
+
+브로커는 가용 VM 접속정보와 실행 상태를 관리한다.
+Runtime은 RDP 클라이언트로 VM에 접속하고 EXE 전송, 일반 사용자 권한 실행,
+타임아웃, 결과 수집을 구현한다. 이 API가 EXE를 대신 실행하지는 않는다.
+RDP 파일은 요청 때 생성하며 브로커에 VM별 파일로 저장하지 않는다.
+SSH/SFTP 개인 키나 서버 호스트 키를 사용하는 계약이 아니다.
+
+공통 설정
+- Base URL: https://broker.mjsec.kr/api
+- Authorization: Bearer <RUNTIME_API_TOKEN>
+- POST에는 Content-Type: application/json도 지정한다.
+- 기존 Runtime 전용 토큰을 사용한다. Admin 토큰을 사용하지 않는다.
+- resource_target_id는 브로커 내부 VM UUID다. Azure VM 이름이나 구독 ID가 아니다.
+- Windows 비밀번호는 Runtime의 비밀 저장소에서 별도 관리한다.
+  브로커 응답과 rdp_file에는 비밀번호를 넣지 않는다.
+- 모든 예시의 UUID, IP, 계정은 예시 값이다.
+
+1. 지금 배정 가능한 Windows VM 목록
+
+GET /v1/runtime/windows-vms?limit=200
+Request body: 없음
+Response: 200
+{
+  "items": [
+    {
+      "resource_target_id": "00000000-0000-4000-8000-000000000001",
+      "name": "example-windows-vm",
+      "protocol": "rdp",
+      "host": "203.0.113.10",
+      "port": 3389,
+      "username": "msgexec",
+      "rdp_file": "full address:s:203.0.113.10:3389\r\nusername:s:msgexec\r\nprompt for credentials:i:1\r\nenablecredsspsupport:i:1\r\nredirectclipboard:i:0\r\nredirectprinters:i:0\r\ndrivestoredirect:s:\r\n"
+    }
+  ],
+  "next_cursor": null
+}
+
+반환 조건: Azure가 WINDOWS로 확인한 VM, 활성 계정, 등록됨(enabled=true),
+RUNNING Provider 상태, 삭제/retire되지 않음, 관리자가 접속정보를 설정하고
+접속 사용을 허용함, 브로커 실행 상태 READY, 사용 가능한 IP가 있음.
+실행 중(RUNNING), 초기화 필요(RESET_REQUIRED), 접속 미설정 VM은 제외한다.
+조건을 만족하는 VM이 없으면 200과 {"items":[],"next_cursor":null}을 반환한다.
+limit은 1~200이며 기본 200이다. next_cursor가 있으면 after=<next_cursor>로 이어서 조회한다.
+목록은 DB snapshot이다. 조회 자체가 VM을 점유하거나 현재 네트워크 접속을 검사하지 않는다.
+기존 Scheduler가 대상 VM을 결정하며, Runtime은 시작 통보 승인 전 실행하면 안 된다.
+
+2. 선택된 VM의 접속정보
+
+GET /v1/runtime/windows-vms/{resource_target_id}/connection
+Request body: 없음
+Response: 200, 위 items의 객체 한 개와 동일한 형식.
+단건 조회에도 동일한 가용성 조건을 적용한다. 실행 중/초기화 필요 VM은 409다.
+목록에 이미 접속정보가 있으면 단건 조회는 생략할 수 있다.
+Runtime은 반환받은 host, port, username으로 RDP 클라이언트를 구성하거나,
+rdp_file 문자열을 로컬 임시 .rdp 파일로 저장해 사용할 수 있다.
+파일로 저장할 때 Windows 클라이언트 호환을 위해 UTF-16LE BOM 인코딩을 권장한다.
+
+3. 실행 시작/종료 통보 (하나의 API에서 event로 구분)
+
+POST /v1/runtime/windows-vms/{resource_target_id}/execution-events
+
+시작 요청:
+{
+  "execution_id": "00000000-0000-4000-8000-000000000002",
+  "event": "started"
+}
+
+200 응답 예시:
+{
+  "resource_target_id": "00000000-0000-4000-8000-000000000001",
+  "execution_id": "00000000-0000-4000-8000-000000000002",
+  "execution_state": "RUNNING",
+  "vm_state": "RUNNING",
+  "started_at": "2026-01-01T00:00:00Z",
+  "finished_at": null,
+  "result": null,
+  "exit_code": null,
+  "replayed": false
+}
+
+started는 실행 준비를 포함한 VM 점유 승인이다.
+RDP 로그인, 파일 전송, EXE 실행 전에 반드시 이 요청의 200 응답을 받아야 한다.
+다른 실행이 먼저 VM을 점유했으면 409가 오므로 그 VM에서 실행하지 않는다.
+execution_id는 실제 제출/실행마다 새 UUID를 생성한다.
+네트워크 오류로 재시도할 때는 같은 UUID와 같은 요청을 보낸다.
+같은 실행의 중복 시작은 replayed=true다. 완료된 실행 ID는 다시 시작할 수 없다.
+
+종료 요청:
+{
+  "execution_id": "00000000-0000-4000-8000-000000000002",
+  "event": "finished",
+  "result": "succeeded",
+  "exit_code": 0
+}
+
+Response: 200. 같은 응답 구조에서 execution_state=FINISHED,
+vm_state=RESET_REQUIRED, finished_at/result/exit_code가 기록된다.
+result는 succeeded, failed, timeout, unreachable 중 하나다.
+exit_code는 선택 사항이다. timeout, BSOD, VM 접속 불가처럼 종료 코드를
+모르는 경우 생략하거나 null을 보낸다. Windows signed/unsigned 32-bit 값을 지원한다.
+성공(result=succeeded)에 0이 아닌 종료 코드는 허용하지 않는다.
+started 이후 업로드 실패, 실행 실패, 타임아웃, VM 장애가 발생한 경우에도
+finished를 통보한다. stdout/stderr, EXE 파일, 비밀번호는 브로커에 보내지 않는다.
+완료 통보가 실패하면 Runtime에서 같은 요청을 보관하고 재시도한다.
+동일한 finished 요청은 replayed=true로 처리하고 초기화를 중복 시작하지 않는다.
+종료 결과를 바꾼 재전송, 다른 VM에서 같은 execution_id 재사용은 409다.
+늦게 도착한 과거 완료 통보는 새 실행 상태를 변경하지 않는다.
+
+현재 초기화 정책
+- 깨끗한 기준 이미지/스냅샷이 아직 없어 자동 복구는 수행하지 않는다.
+- finished 수신 후 RESET_REQUIRED로 잠그며 가용 목록과 접속정보 반환에서 제외한다.
+- Windows 재부팅이나 프로세스 종료만으로 READY로 되돌리지 않는다.
+- 운영자가 실제 깨끗한 상태로 복구한 후 해당 execution_id를 지정해 복구를 확인한다.
+- finished는 초기화 완료 통보가 아니다. Runtime이 VM을 READY로 바꾸는 API는 없다.
+
+오류 처리
+응답 형식 예시:
+{"error":{"code":"WINDOWS_VM_NOT_READY","message":"The VM is running an execution or requires a clean reset."}}
+
+- 401: Runtime 토큰 누락 또는 불일치.
+- 404 WINDOWS_VM_NOT_FOUND: 해당 UUID의 Azure Windows VM이 없음.
+- 404 WINDOWS_EXECUTION_NOT_FOUND: 성공한 started 기록 없이 finished를 보냄.
+- 409 WINDOWS_VM_NOT_READY: 실행 중이거나 초기화가 필요한 VM.
+- 409 WINDOWS_CONNECTION_DISABLED: 접속 사용이 비활성화됨.
+- 409 WINDOWS_VM_UNAVAILABLE: 계정/등록/Provider 전원 상태가 사용 조건을 충족하지 않음.
+- 409 WINDOWS_VM_ADDRESS_UNAVAILABLE: 지정한 종류의 VM IP가 없음/유효하지 않음.
+- 409 WINDOWS_EXECUTION_CONFLICT: VM 또는 실행 결과/ID 충돌.
+- 409 WINDOWS_EXECUTION_FINISHED: 이미 종료한 execution_id로 시작 요청.
+- 422: UUID, event, result, exit_code 등 요청 형식 오류 (FastAPI detail 형식).
+- 500 DATABASE_ERROR: DB 처리 실패. 일시 오류는 같은 execution_id로 재시도.
+- 503 WINDOWS_CONNECTION_NOT_CONFIGURED: 관리자가 RDP 접속정보를 설정하지 않음.
+- 503 RUNTIME_AUTH_NOT_CONFIGURED: 서버 Runtime 인증 설정이 없음.
+이 API는 Cloud 관리 API를 호출하지 않으므로 502 응답은 사용하지 않는다.
+
+운영자 설정 (Runtime 담당자는 호출하지 않음)
+
+Admin Bearer 인증으로 다음 경로를 사용한다.
+GET /v1/admin/windows-vms/{resource_target_id}/connection
+  저장한 RDP 접속정보, enabled, state, current_execution_id, updated_at을 조회한다.
+PUT /v1/admin/windows-vms/{resource_target_id}/connection
+{
+  "username": "msgexec",
+  "port": 3389,
+  "address_source": "public_ip",
+  "enabled": true
+}
+200으로 위 설정과 resource_target_id, state, current_execution_id, updated_at을 반환한다.
+address_source는 public_ip 또는 private_ip이며 기본 public_ip, port 기본값은 3389다.
+VM별 비밀번호와 관리자 비밀번호는 이 요청에 넣지 않는다.
+관리자는 일반 실행 계정의 실제 RDP 로그인과 Runtime의 비밀번호 준비,
+방화벽/서버 인증서 신뢰 설정을 확인한 뒤 enabled=true로 설정해야 한다.
+이 설정 API는 Windows 계정 생성이나 방화벽 변경을 수행하지 않는다.
+Azure Sync로 os_type=WINDOWS를 수집하고 VM 등록도 먼저 완료해야 한다.
+실행 중 설정 변경은 409 WINDOWS_VM_BUSY로 거절한다.
+
+초기화 후에는 위 PUT 본문에 다음 값을 추가한다.
+"reset_execution_id": "00000000-0000-4000-8000-000000000002"
+실제로 깨끗하게 복구한 뒤에만 요청한다. 대기 중인 실행 ID와 일치해야 READY로
+전환된다. 불일치/불필요한 복구 확인은 409 WINDOWS_RESET_CONFLICT다.
+reset_execution_id를 생략한 설정 수정은 RESET_REQUIRED 잠금을 해제하지 않는다.
+
+연결 시 주의
+- 현재 RDP 연결 파일은 클립보드와 로컬 드라이브 공유를 켜지 않는다.
+- RDP 접속 성공과 EXE 자동 전송/실행 성공은 별개의 검증이다.
+- 파일 전송과 프로세스 실행·완료 판정은 Runtime의 RDP 구현에서 별도로 마련해야 한다.
+- RDP 서버 인증서 검증을 생략하거나 모든 VM을 신뢰하는 설정을 기본값으로 두지 않는다.
+- 참가자 EXE를 관리자 계정으로 실행하지 않는다.

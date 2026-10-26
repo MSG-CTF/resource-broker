@@ -38,6 +38,10 @@ from app.api.scheduler_auth import (
     scheduler_auth_http_error_handler,
 )
 from app.api.windows_worker_leases import router as windows_worker_leases_router
+from app.api.windows_runtime import (
+    router as windows_runtime_router,
+    admin_router as admin_windows_runtime_router,
+)
 from app.services.bootstrap_worker import run_bootstrap_worker
 from app.services.windows_worker import run_windows_worker
 
@@ -98,6 +102,8 @@ def create_app() -> FastAPI:
     app.include_router(reservations_router)
     app.include_router(runtime_k3s_credentials_router)
     app.include_router(windows_worker_leases_router)
+    app.include_router(windows_runtime_router)
+    app.include_router(admin_windows_runtime_router)
     app.include_router(health_router)
 
     @app.get(
