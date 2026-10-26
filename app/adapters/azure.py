@@ -660,6 +660,8 @@ class AzureAdapter:
                     getattr(vm, "location", None),
                 )
                 machine_type = _machine_type(vm)
+                os_disk = getattr(getattr(vm, "storage_profile", None), "os_disk", None)
+                os_type = (getattr(os_disk, "os_type", None) or "").upper()
                 status_vm = status_by_vm_key.get(_vm_lookup_key(vm), vm)
                 (
                     capacity_cpu_millicores,
@@ -687,6 +689,7 @@ class AzureAdapter:
                         internal_ip=internal_ip,
                         external_ip=external_ip,
                         architecture=architecture,
+                        os_type=os_type if os_type in {"WINDOWS", "LINUX"} else None,
                         provider_capacity_cpu_millicores=(
                             capacity_cpu_millicores
                         ),

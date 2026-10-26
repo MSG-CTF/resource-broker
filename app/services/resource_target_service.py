@@ -120,6 +120,9 @@ class ResourceTargetService:
                 "PROVIDER_INSTANCE_NOT_RUNNING",
                 "The latest Provider snapshot does not confirm a running VM.",
             )
+        # Windows registration is operator-owned; Runtime readiness is checked separately.
+        if resource.account.provider is Provider.AZURE and resource.os_type == "WINDOWS":
+            return
         if not resource.ready:
             raise self._registration_error(
                 "RUNTIME_NOT_READY",

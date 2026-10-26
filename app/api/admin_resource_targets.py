@@ -79,6 +79,7 @@ def _resource_response(
         zone=resource.zone,
         status=resource.provider_instance_state,
         machine_type=resource.provider_machine_type,
+        os_type=resource.os_type,
         architecture=resource.architecture,
         internal_ip=resource.private_ip,
         external_ip=resource.public_ip,

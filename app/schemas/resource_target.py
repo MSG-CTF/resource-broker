@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,6 +48,7 @@ class AdminResourceTargetResponse(ApiSchema):
     zone: str | None
     status: str | None
     machine_type: str | None
+    os_type: Literal["WINDOWS", "LINUX"] | None = None
     architecture: Architecture | None
     internal_ip: str | None
     external_ip: str | None

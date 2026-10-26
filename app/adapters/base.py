@@ -44,8 +44,11 @@ class ProviderInstanceSummary:
     provider_capacity_cpu_millicores: int | None = None
     provider_capacity_memory_mib: int | None = None
     provider_capacity_storage_mib: int | None = None
+    os_type: str | None = None
 
     def __post_init__(self) -> None:
+        if self.os_type is not None and self.os_type not in {"WINDOWS", "LINUX"}:
+            raise ValueError("os_type must be WINDOWS, LINUX, or None")
         _require_non_empty_string(
             "provider_scope_id",
             self.provider_scope_id,

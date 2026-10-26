@@ -142,6 +142,7 @@ class ProviderAccountTable(Base):
 class ResourceTargetTable(Base):
     __tablename__ = "resource_targets"
     __table_args__ = (
+        CheckConstraint("os_type IN ('WINDOWS', 'LINUX')", name="resource_target_os_type"),
         UniqueConstraint(
             "account_id",
             "provider_scope_id",
@@ -266,6 +267,7 @@ class ResourceTargetTable(Base):
         String(255),
         nullable=True,
     )
+    os_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     private_ip: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,

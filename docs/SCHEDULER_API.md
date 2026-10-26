@@ -281,6 +281,16 @@ Runtime is ready, the observation is
 fresh, and Provider capacity, whole-node usage, and allocatable capacity are
 all present. Setting `enabled: false` always stops new candidate placement and
 does not delete running workloads or active reservations.
+
+Azure VMs with Provider-confirmed `os_type: "WINDOWS"` can be registered without
+Node Agent installation or Runtime observations. Registration still requires an
+enabled account, a non-retired VM, and a `RUNNING` Provider snapshot. It does not
+set Runtime readiness, fabricate capacity observations, or bypass candidate and
+reservation checks. Windows execution callbacks and reset automation remain a
+separate integration. Other VMs retain the existing observation requirements.
+After applying migration `20261026_0013` during a later deployment, run Azure
+Sync again to populate `os_type`; existing rows remain unknown until then.
+
 An otherwise enabled, non-retired account/VM with a non-`RUNNING` power state
 returns `409 PROVIDER_INSTANCE_NOT_RUNNING` on registration. The Admin dashboard
 shows the same reason and permits unregistration even while the VM is stopped.
