@@ -252,6 +252,7 @@ class ReservationService:
         cpu_millicores: int,
         memory_mib: int,
         ephemeral_storage_mib: int,
+        startup_cpu_millicores: int | None = None,
     ) -> ReservationTable:
         reservation = self._reservations.get(
             reservation_id,
@@ -270,6 +271,7 @@ class ReservationService:
                 cpu_millicores=cpu_millicores,
                 memory_mib=memory_mib,
                 ephemeral_storage_mib=ephemeral_storage_mib,
+                startup_cpu_millicores=startup_cpu_millicores,
             ):
                 return reservation
             raise ReservationMutationConflictError
@@ -279,8 +281,16 @@ class ReservationService:
             raise ReservationStateConflictError
         if reservation.status is not ReservationStatus.HELD:
             raise ReservationStateConflictError
+        cpu_matches = (
+            reservation.cpu_millicores == cpu_millicores
+            if startup_cpu_millicores is None
+            else (
+                startup_cpu_millicores == reservation.cpu_millicores
+                and 0 < cpu_millicores < startup_cpu_millicores
+            )
+        )
         if (
-            reservation.cpu_millicores != cpu_millicores
+            not cpu_matches
             or reservation.memory_mib != memory_mib
             or reservation.ephemeral_storage_mib
             != ephemeral_storage_mib
@@ -463,6 +473,7 @@ class ReservationService:
         cpu_millicores: int,
         memory_mib: int,
         ephemeral_storage_mib: int,
+        startup_cpu_millicores: int | None = None,
     ) -> bool:
         return (
             reservation.commit_request_id == request_id
@@ -472,6 +483,11 @@ class ReservationService:
             and reservation.deployed_memory_mib == memory_mib
             and reservation.deployed_ephemeral_storage_mib
             == ephemeral_storage_mib
+            and startup_cpu_millicores == (
+                reservation.cpu_millicores
+                if reservation.deployed_cpu_millicores != reservation.cpu_millicores
+                else None
+            )
         )
 
     @staticmethod
