@@ -20,7 +20,7 @@ class InventoryPrincipal:
     subject: str = "inventory-reader"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class InventoryAuthHttpError(Exception):
     status_code: int
     code: str

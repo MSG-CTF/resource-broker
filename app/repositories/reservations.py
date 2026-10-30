@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.tables import (
@@ -79,7 +79,7 @@ class CandidateRepository:
         statement = (
             select(
                 ReservationTable.resource_target_id,
-                func.sum(ReservationTable.cpu_millicores),
+                func.sum(_charged_cpu()),
                 func.sum(ReservationTable.memory_mib),
                 func.sum(ReservationTable.ephemeral_storage_mib),
             )
@@ -251,7 +251,7 @@ class ReservationRepository:
     ) -> ReservedCapacity:
         statement = (
             select(
-                func.sum(ReservationTable.cpu_millicores),
+                func.sum(_charged_cpu()),
                 func.sum(ReservationTable.memory_mib),
                 func.sum(ReservationTable.ephemeral_storage_mib),
             )
@@ -267,6 +267,22 @@ class ReservationRepository:
             memory_mib=int(memory or 0),
             ephemeral_storage_mib=int(storage or 0),
         )
+
+
+def _charged_cpu():
+    # Keep the original booking for CREATE replay; charge steady CPU only after
+    # the authenticated commit confirms that startup CPU has been restored.
+    return case(
+        (
+            and_(
+                ReservationTable.status == ReservationStatus.COMMITTED,
+                ReservationTable.deployed_cpu_millicores > 0,
+                ReservationTable.deployed_cpu_millicores <= ReservationTable.cpu_millicores,
+            ),
+            ReservationTable.deployed_cpu_millicores,
+        ),
+        else_=ReservationTable.cpu_millicores,
+    )
 
 
 def _deductible_reservation_filter(now: datetime):

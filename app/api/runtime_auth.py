@@ -20,7 +20,7 @@ class RuntimePrincipal:
     subject: str = "runtime"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class RuntimeAuthHttpError(Exception):
     status_code: int
     code: str
