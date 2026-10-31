@@ -792,3 +792,11 @@ footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: s
   .runtime-container-meta code { width: 100%; }
   footer { padding: 20px; flex-direction: column; gap: 6px; }
 }
+
+.vm-power-controls { padding: 14px 20px; border-top: 1px solid #e7ebf0; display: grid; gap: 12px; }
+.vm-power-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.vm-power-actions label, .vm-power-selection { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.vm-power-result { display: inline-block; max-width: 100%; overflow-wrap: anywhere; font-size: 12px; }
+.vm-power-running { color: #855f00; }
+.vm-power-done { color: #16704b; }
+.vm-power-error { color: #ae2537; }

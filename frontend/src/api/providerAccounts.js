@@ -106,6 +106,18 @@ export function updateResourceTargetCandidateRegistration(
   );
 }
 
+export function setVmPower(resourceTargetId, action) {
+  return request(`/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/power`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
+export function getVmPowerOperation(resourceTargetId, operationName, action) {
+  const query = new URLSearchParams({ action });
+  return request(`/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/power-operations/${encodeURIComponent(operationName)}?${query}`);
+}
+
 export function listResourceTargetContainers(resourceTargetId, { signal } = {}) {
   return request(
     `/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/containers`,

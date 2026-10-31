@@ -9,6 +9,15 @@ class GcpInstancesClient(Protocol):
     def aggregated_list(self, *, request: object) -> Iterable[tuple[str, Any]]:
         raise NotImplementedError
 
+    def get(self, *, project: str, zone: str, instance: str) -> Any:
+        raise NotImplementedError
+
+    def start(self, *, project: str, zone: str, instance: str) -> Any:
+        raise NotImplementedError
+
+    def stop(self, *, project: str, zone: str, instance: str) -> Any:
+        raise NotImplementedError
+
 
 class GcpMachineTypesClient(Protocol):
     def get(
@@ -274,6 +283,36 @@ class GcpAdapter:
         )
         self._machine_type_cache[cache_key] = capacity
         return capacity
+
+    def get_instance(self, *, zone: str, name: str) -> Any:
+        try:
+            return self._instances_client.get(project=self._project_id, zone=zone, instance=name)
+        except Exception as error:
+            raise _translate_google_error(self._project_id, error) from error
+
+    def set_power(self, *, zone: str, name: str, action: str) -> str:
+        try:
+            method = self._instances_client.start if action == "START" else self._instances_client.stop
+            operation = method(project=self._project_id, zone=zone, instance=name)
+            return operation.name
+        except Exception as error:
+            raise _translate_google_error(self._project_id, error) from error
+
+    def get_power_operation(self, *, zone: str, operation_name: str) -> tuple[bool, bool, str, str]:
+        try:
+            from google.cloud import compute_v1
+
+            operation = compute_v1.ZoneOperationsClient().get(
+                project=self._project_id, zone=zone, operation=operation_name
+            )
+            return (
+                operation.status == compute_v1.Operation.Status.DONE,
+                bool(getattr(operation.error, "errors", ())),
+                str(operation.target_id),
+                operation.operation_type.upper(),
+            )
+        except Exception as error:
+            raise _translate_google_error(self._project_id, error) from error
 
     def list_instances(self) -> tuple[ProviderInstanceSummary, ...]:
         request = self._request_factory(

@@ -1,11 +1,12 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.adapters.gcp import GcpAdapterError, GcpDependencyError
 from app.api.admin_auth import require_admin
 from app.db.session import get_db_session
 from app.db.tables import ResourceTargetTable, RuntimeContainerTable
@@ -20,7 +21,10 @@ from app.schemas.resource_target import (
     ResourceCapacityResponse,
     ResourceRuntimeResponse,
     ResourceUsageResponse,
+    VmPowerRequest,
+    VmPowerResponse,
 )
+from app.services.gcp_vm_power_service import GcpVmPowerService, VmPowerError
 from app.services.resource_target_service import (
     ResourceTargetNotEligibleError,
     ResourceTargetNotFoundError,
@@ -168,6 +172,54 @@ def list_resource_targets(
         offset=offset,
         items=[_resource_response(item) for item in outcome.resources],
     )
+
+
+@router.post(
+    "/{resource_target_id}/power",
+    response_model=VmPowerResponse,
+    status_code=202,
+    summary="Start or stop a tagged GCP problem VM",
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}, 502: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def set_vm_power(
+    resource_target_id: UUID,
+    request: VmPowerRequest,
+    session: Session = Depends(get_db_session),
+) -> VmPowerResponse | Response:
+    try:
+        result = GcpVmPowerService(session).start_or_stop(resource_target_id, request.action)
+    except VmPowerError as error:
+        return _error_response(404 if error.code == "RESOURCE_TARGET_NOT_FOUND" else 409, error.code, error.message)
+    except GcpAdapterError as error:
+        return _error_response(503 if isinstance(error, GcpDependencyError) else 502, error.error_code, error.public_message)
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(500, "DATABASE_ERROR", "The VM power state could not be updated.")
+    return VmPowerResponse(status=result.status, vm_status=result.vm_status, operation_name=result.operation_name)
+
+
+@router.get(
+    "/{resource_target_id}/power-operations/{operation_name}",
+    response_model=VmPowerResponse,
+    summary="Check a GCP problem VM power operation",
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}, 502: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_vm_power_operation(
+    resource_target_id: UUID,
+    operation_name: Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,128}$")],
+    action: Literal["START", "STOP"],
+    session: Session = Depends(get_db_session),
+) -> VmPowerResponse | Response:
+    try:
+        result = GcpVmPowerService(session).operation_status(resource_target_id, action, operation_name)
+    except VmPowerError as error:
+        return _error_response(404 if error.code == "RESOURCE_TARGET_NOT_FOUND" else 409, error.code, error.message)
+    except GcpAdapterError as error:
+        return _error_response(503 if isinstance(error, GcpDependencyError) else 502, error.error_code, error.public_message)
+    except SQLAlchemyError:
+        session.rollback()
+        return _error_response(500, "DATABASE_ERROR", "The VM power state could not be updated.")
+    return VmPowerResponse(status=result.status, vm_status=result.vm_status, operation_name=result.operation_name)
 
 
 @router.patch(

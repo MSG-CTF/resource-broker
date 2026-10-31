@@ -237,6 +237,10 @@ resource "google_compute_instance" "problems" {
   desired_status = var.problem_vms_running ? "RUNNING" : "TERMINATED"
   tags           = ["msg-problem"]
 
+  lifecycle {
+    ignore_changes = [desired_status]
+  }
+
   boot_disk {
     auto_delete = true
 

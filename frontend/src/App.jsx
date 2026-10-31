@@ -12,6 +12,7 @@ import {
   createWindowsWorkerPool,
   deleteProviderAccount,
   getGcpCreditEstimate,
+  getVmPowerOperation,
   getAdminToken,
   listBootstrapJobs,
   listProviderAccounts,
@@ -20,6 +21,7 @@ import {
   listWindowsWorkerPools,
   loginAdmin,
   setAdminToken,
+  setVmPower,
   syncProviderAccount,
   updateGcpCreditSettings,
   updateResourceTargetCandidateRegistration,
@@ -27,6 +29,17 @@ import {
 } from "./api/providerAccounts.js";
 
 const CANDIDATE_OBSERVATION_STALE_MS = 10 * 60 * 1000;
+const KOTH_PROJECT_IDS = new Set(["msg-60242078", "msg-60222143", "msg-60222538"]);
+const GENERAL_PROBLEM_PROJECT_IDS = new Set([
+  "msg-60222538-2", "msg-60222143-2", "msg-60251955", "msg-60251955-512519",
+  "msg-60222535", "msg-60222535-2", "msg-60222535-3", "msg-60251950",
+  "msg-60222513", "msg-602221513-2",
+]);
+
+function isPowerManagedVm(resource) {
+  return resource.provider === "GCP" && !resource.retired_at && resource.account_enabled
+    && (KOTH_PROJECT_IDS.has(resource.scope_id) || GENERAL_PROBLEM_PROJECT_IDS.has(resource.scope_id));
+}
 
 const PROVIDER_DEFINITIONS = {
   GCP: {
@@ -1150,6 +1163,10 @@ function ResourceInventory({
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
   const [bootstrapReloadKey, setBootstrapReloadKey] = useState(0);
   const [registrationFilter, setRegistrationFilter] = useState("");
+  const [powerGroup, setPowerGroup] = useState("");
+  const [selectedPowerIds, setSelectedPowerIds] = useState(new Set());
+  const [powerStates, setPowerStates] = useState({});
+  const [powerBusy, setPowerBusy] = useState(false);
 
   useEffect(() => {
     if (!selectedResource) return undefined;
@@ -1278,7 +1295,10 @@ function ResourceInventory({
           ? "AWS Region"
           : "Scope ID";
   const visibleResources = useMemo(() => {
-    const inventory = windowsOnly ? resources.filter(isAzureWindowsVm) : resources;
+    const inventory = windowsOnly ? resources.filter(isAzureWindowsVm) : resources.filter((resource) => (
+      !powerGroup || (resource.provider === "GCP" &&
+        (powerGroup === "koth" ? KOTH_PROJECT_IDS : GENERAL_PROBLEM_PROJECT_IDS).has(resource.scope_id))
+    ));
     if (registrationFilter === "registered") {
       return inventory.filter((resource) => resource.enabled);
     }
@@ -1286,7 +1306,34 @@ function ResourceInventory({
       return inventory.filter((resource) => !resource.enabled);
     }
     return inventory;
-  }, [registrationFilter, resources, windowsOnly]);
+  }, [powerGroup, registrationFilter, resources, windowsOnly]);
+  const powerResources = visibleResources.filter(isPowerManagedVm);
+  const selectedPowerResources = powerResources.filter((resource) => selectedPowerIds.has(resource.resource_target_id));
+
+  async function changePower(action) {
+    const expectedStatus = action === "START" ? "TERMINATED" : "RUNNING";
+    const targets = selectedPowerResources.filter((resource) => resource.status === expectedStatus);
+    if (!targets.length || !window.confirm(`선택한 ${targets.length}개 GCP 문제 VM을 ${action === "START" ? "시작" : "중지"}할까요?${action === "STOP" ? "\n실행 중인 문제 서비스가 중단됩니다." : ""}`)) return;
+    setPowerBusy(true);
+    await Promise.all(targets.map(async (resource) => {
+      const id = resource.resource_target_id;
+      setPowerStates((current) => ({ ...current, [id]: { status: "RUNNING", message: "진행 중" } }));
+      try {
+        let result = await setVmPower(id, action);
+        const deadline = Date.now() + 5 * 60 * 1000;
+        while (result.status === "RUNNING" && Date.now() < deadline) {
+          await new Promise((resolve) => window.setTimeout(resolve, 3000));
+          result = await getVmPowerOperation(id, result.operation_name, action);
+        }
+        if (result.status !== "DONE") throw new Error("5분 안에 완료 상태를 확인하지 못했습니다. 새로고침 후 실제 VM 상태를 확인하세요.");
+        setPowerStates((current) => ({ ...current, [id]: { status: "DONE", message: "완료" } }));
+      } catch (requestError) {
+        setPowerStates((current) => ({ ...current, [id]: { status: "ERROR", message: `오류: ${requestError.message}` } }));
+      }
+    }));
+    setPowerBusy(false);
+    await onRefresh();
+  }
 
   return (
     <section className="panel resources-panel" aria-labelledby="inventory-title">
@@ -1328,6 +1375,29 @@ function ResourceInventory({
             {value ? PROVIDER_DEFINITIONS[value].shortLabel : "전체"}
           </button>
         ))}
+      </div>}
+
+      {!windowsOnly && <div className="vm-power-controls">
+        <div className="inventory-provider-filters" role="group" aria-label="문제 유형 필터">
+          <span>문제 유형</span>
+          {[["", "전체"], ["koth", "KOTH"], ["general", "일반 문제"]].map(([value, label]) => (
+            <button key={value} type="button" className={powerGroup === value ? "is-active" : ""}
+              aria-pressed={powerGroup === value} onClick={() => setPowerGroup(value)}>{label}</button>
+          ))}
+        </div>
+        <div className="vm-power-actions">
+          <label><input type="checkbox" checked={powerResources.length > 0 && powerResources.every((resource) => selectedPowerIds.has(resource.resource_target_id))}
+            onChange={(event) => setSelectedPowerIds((current) => {
+              const next = new Set(current);
+              powerResources.forEach((resource) => event.target.checked ? next.add(resource.resource_target_id) : next.delete(resource.resource_target_id));
+              return next;
+            })} /> 표시된 GCP 문제 VM 전체 선택</label>
+          <span>{selectedPowerResources.length}개 선택</span>
+          <button className="button button-ghost" type="button" disabled={powerBusy || !selectedPowerResources.some((resource) => resource.status === "TERMINATED")}
+            onClick={() => changePower("START")}>선택 VM 시작</button>
+          <button className="button button-ghost" type="button" disabled={powerBusy || !selectedPowerResources.some((resource) => resource.status === "RUNNING")}
+            onClick={() => changePower("STOP")}>선택 VM 중지</button>
+        </div>
       </div>}
 
       <div className="inventory-provider-filters inventory-account-filters" role="group" aria-label="계정 표시 이름 필터">
@@ -1408,6 +1478,21 @@ function ResourceInventory({
                   </div>
                   <div className="vm-status">
                     <StatusBadge value={resource.status || "UNKNOWN"} />
+                    {!windowsOnly && isPowerManagedVm(resource) && (
+                      <label className="vm-power-selection" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <input type="checkbox" checked={selectedPowerIds.has(resource.resource_target_id)} disabled={powerBusy}
+                          onChange={(event) => setSelectedPowerIds((current) => {
+                            const next = new Set(current);
+                            event.target.checked ? next.add(resource.resource_target_id) : next.delete(resource.resource_target_id);
+                            return next;
+                          })} /> 전원 선택
+                      </label>
+                    )}
+                    {powerStates[resource.resource_target_id] && (
+                      <span className={`vm-power-result vm-power-${powerStates[resource.resource_target_id].status.toLowerCase()}`} role="status">
+                        {powerStates[resource.resource_target_id].message}
+                      </span>
+                    )}
                     {resource.retired_at && <span>Retired</span>}
                     <CandidateRegistrationControl
                       resource={resource}

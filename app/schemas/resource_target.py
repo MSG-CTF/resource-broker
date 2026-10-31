@@ -26,6 +26,16 @@ class AdminResourceTargetUpdateRequest(ApiSchema):
     enabled: bool = Field(strict=True)
 
 
+class VmPowerRequest(ApiSchema):
+    action: Literal["START", "STOP"]
+
+
+class VmPowerResponse(ApiSchema):
+    status: Literal["RUNNING", "DONE"]
+    vm_status: str
+    operation_name: str | None = None
+
+
 class ResourceRuntimeResponse(ApiSchema):
     type: RuntimeType | None
     target_id: str | None

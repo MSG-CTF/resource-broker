@@ -213,35 +213,13 @@ Agent가 설치되거나 Runtime ready가 되는 것은 아닙니다.
 
 ## 문제 VM 일시 중지와 다시 시작
 
-`projects.tfvars`에서 `problem_vms_running = false`로 설정하면 이 state가 관리하는
-문제 VM의 `desired_status`를 `TERMINATED`로 변경합니다. GCP에서 이 값은 삭제가
-아닌 중지 상태이며 디스크, 고정 공인 IP, 네트워크와 IAM은 유지합니다. 메모리의
-프로세스 상태는 보존하지 않습니다. 이 state가 관리하지 않는 VM은 대상이 아닙니다.
-
-```powershell
-terraform plan "-var-file=projects.tfvars" "-out=vm-stop.tfplan"
-```
-
-중지만 하려면 계획이 `0 to add, N to change, 0 to destroy`이고, 변경 항목이 기존
-문제 VM의 `desired_status`뿐인지 확인합니다. 중지 옵션은 생성 여부를 제어하지
-않으므로 아직 생성하지 않은 VM이 구성에 있으면 일반 plan에 생성 작업도 포함됩니다.
-`-target`으로 기존 VM만 지정해도 의존하는 미생성 IP가 생성 대상에 포함될 수 있습니다.
-이 경우 일반 plan을 적용하지 않습니다. 이번 `vm-stop.tfplan`은 state에 존재하는
-문제 VM 전체만 `local.problem_vms`에 넣는 임시 override로 만들고, 생성·삭제가 없는지
-검증한 중지 전용 계획입니다. 계획 생성 후 override 파일은 제거하며 기존 state는
-직접 수정하지 않습니다. 이후 계획을 다시 만들 때도 미생성 VM/IP를 제외한 범위를
-확인하고, 정상 배포 전에는 원래 구성의 전체 plan을 다시 확인합니다.
-
-```powershell
-terraform apply vm-stop.tfplan
-terraform output problem_vms
-```
-
-적용 후 VM의 `current_status`가 `TERMINATED`인지 확인합니다. 다시 켤 때는
-`projects.tfvars`의 `problem_vms_running = true`로 바꾸고 새 plan을 만들어 적용합니다.
-미생성 VM을 추가하고 싶지 않으면 다시 시작할 때도 같은 기존 VM만 대상으로 잡습니다.
-중지할 때 Project를 목록에서 빼거나 `terraform destroy`를 사용하지 마세요.
-이전에 저장한 생성/시작 plan은 현재 중지 설정을 반영하지 않으므로 재사용하지 않습니다.
+`problem_vms_running`은 새 VM을 만들 때의 초기 전원 상태만
+정합니다. 기존 문제 VM의 시작·중지는 Broker 대시보드의 `전체 VM`에서 GCP 문제
+VM을 선택해 실행합니다. Terraform은 기존 VM의 `desired_status` 변경을 무시하므로
+다음 `terraform apply`가 대시보드의 전원 상태를 되돌리지 않습니다.
+중지는 VM 삭제가 아니며 디스크·고정 공인 IP·네트워크와 IAM은 유지합니다.
+메모리의 프로세스 상태는 보존하지 않습니다. Terraform 관리 목록에서 VM을 빼거나
+`terraform destroy`를 사용해 중지하지 마세요.
 
 CPU와 RAM의 실행 요금은 중지 후 멈추지만 디스크와 고정 공인 IPv4는 계속 과금됩니다.
 현재 `us-central1` 정가 기준으로 VM 네 대·디스크 300 GiB·고정 IP 네 개를 보유하면
