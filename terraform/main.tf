@@ -236,6 +236,9 @@ resource "google_compute_instance" "problems" {
   machine_type   = each.value.machine_type
   desired_status = var.problem_vms_running ? "RUNNING" : "TERMINATED"
   tags           = ["msg-problem"]
+  metadata = {
+    ssh-keys = "sla:${trimspace(file("${path.module}/sla_to_control.pub"))}"
+  }
 
   lifecycle {
     ignore_changes = [desired_status]
