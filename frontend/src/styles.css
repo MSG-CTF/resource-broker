@@ -795,7 +795,9 @@ footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: s
 
 .vm-power-controls { padding: 14px 20px; border-top: 1px solid #e7ebf0; display: grid; gap: 12px; }
 .vm-power-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-.vm-power-actions label, .vm-power-selection { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.vm-power-actions label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.vm-power-pick { flex: 0 0 40px; width: 40px; height: 40px; display: grid; place-items: center; cursor: pointer; }
+.vm-power-pick input, .vm-power-actions input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin: 0; border-radius: 4px; accent-color: #2f65da; cursor: pointer; }
 .vm-power-result { display: inline-block; max-width: 100%; overflow-wrap: anywhere; font-size: 12px; }
 .vm-power-running { color: #855f00; }
 .vm-power-done { color: #16704b; }

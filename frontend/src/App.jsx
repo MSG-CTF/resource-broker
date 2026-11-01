@@ -1466,7 +1466,17 @@ function ResourceInventory({
               >
                 <section className="vm-list-identity">
                   <div className="vm-identity">
-                    <div className="provider-avatar">{definition.avatar}</div>
+                    {!windowsOnly && isPowerManagedVm(resource) ? (
+                      <label className="vm-power-pick" title="VM 전원 선택" onClick={(event) => event.stopPropagation()}>
+                        <input type="checkbox" aria-label={`${resource.name || resource.instance_id} 전원 선택`}
+                          checked={selectedPowerIds.has(resource.resource_target_id)} disabled={powerBusy}
+                          onChange={(event) => setSelectedPowerIds((current) => {
+                            const next = new Set(current);
+                            event.target.checked ? next.add(resource.resource_target_id) : next.delete(resource.resource_target_id);
+                            return next;
+                          })} />
+                      </label>
+                    ) : <div className="provider-avatar">{definition.avatar}</div>}
                     <div>
                       <span className="vm-provider">{definition.label}</span>
                       <h3>{resource.name || "이름 없는 VM"}</h3>
@@ -1478,16 +1488,6 @@ function ResourceInventory({
                   </div>
                   <div className="vm-status">
                     <StatusBadge value={resource.status || "UNKNOWN"} />
-                    {!windowsOnly && isPowerManagedVm(resource) && (
-                      <label className="vm-power-selection" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                        <input type="checkbox" checked={selectedPowerIds.has(resource.resource_target_id)} disabled={powerBusy}
-                          onChange={(event) => setSelectedPowerIds((current) => {
-                            const next = new Set(current);
-                            event.target.checked ? next.add(resource.resource_target_id) : next.delete(resource.resource_target_id);
-                            return next;
-                          })} /> 전원 선택
-                      </label>
-                    )}
                     {powerStates[resource.resource_target_id] && (
                       <span className={`vm-power-result vm-power-${powerStates[resource.resource_target_id].status.toLowerCase()}`} role="status">
                         {powerStates[resource.resource_target_id].message}
