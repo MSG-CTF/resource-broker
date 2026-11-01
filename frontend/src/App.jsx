@@ -1163,7 +1163,7 @@ function ResourceInventory({
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
   const [bootstrapReloadKey, setBootstrapReloadKey] = useState(0);
   const [registrationFilter, setRegistrationFilter] = useState("");
-  const [powerGroup, setPowerGroup] = useState("");
+  const [powerGroup, setPowerGroup] = useState("general");
   const [selectedPowerIds, setSelectedPowerIds] = useState(new Set());
   const [powerStates, setPowerStates] = useState({});
   const [powerBusy, setPowerBusy] = useState(false);
@@ -1296,8 +1296,9 @@ function ResourceInventory({
           : "Scope ID";
   const visibleResources = useMemo(() => {
     const inventory = windowsOnly ? resources.filter(isAzureWindowsVm) : resources.filter((resource) => (
-      !powerGroup || (resource.provider === "GCP" &&
-        (powerGroup === "koth" ? KOTH_PROJECT_IDS : GENERAL_PROBLEM_PROJECT_IDS).has(resource.scope_id))
+      resource.provider === "GCP"
+        ? (powerGroup === "koth" ? KOTH_PROJECT_IDS : GENERAL_PROBLEM_PROJECT_IDS).has(resource.scope_id)
+        : provider === resource.provider
     ));
     if (registrationFilter === "registered") {
       return inventory.filter((resource) => resource.enabled);
@@ -1306,7 +1307,7 @@ function ResourceInventory({
       return inventory.filter((resource) => !resource.enabled);
     }
     return inventory;
-  }, [powerGroup, registrationFilter, resources, windowsOnly]);
+  }, [powerGroup, provider, registrationFilter, resources, windowsOnly]);
   const powerResources = visibleResources.filter(isPowerManagedVm);
   const selectedPowerResources = powerResources.filter((resource) => selectedPowerIds.has(resource.resource_target_id));
 
@@ -1380,7 +1381,7 @@ function ResourceInventory({
       {!windowsOnly && <div className="vm-power-controls">
         <div className="inventory-provider-filters" role="group" aria-label="문제 유형 필터">
           <span>문제 유형</span>
-          {[["", "전체"], ["koth", "KOTH"], ["general", "일반 문제"]].map(([value, label]) => (
+          {[["general", "일반 문제"], ["koth", "KOTH"]].map(([value, label]) => (
             <button key={value} type="button" className={powerGroup === value ? "is-active" : ""}
               aria-pressed={powerGroup === value} onClick={() => setPowerGroup(value)}>{label}</button>
           ))}
