@@ -1157,7 +1157,7 @@ function ResourceInventory({
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapError, setBootstrapError] = useState(null);
   const [bootstrapAction, setBootstrapAction] = useState("INSTALL");
-  const [bootstrapVersion, setBootstrapVersion] = useState("0.4.3");
+  const [bootstrapVersion, setBootstrapVersion] = useState("0.4.5");
   const [k3sVersion, setK3sVersion] = useState("v1.36.4+k3s1");
   const [agentImage, setAgentImage] = useState("");
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
@@ -1658,7 +1658,7 @@ function ResourceInventory({
                     </label>
                     <label>
                       <span>Bootstrap 버전</span>
-                      <input required pattern="[0-9]+\.[0-9]+\.[0-9]+" value={bootstrapVersion} onChange={(event) => setBootstrapVersion(event.target.value)} placeholder="0.4.3" />
+                      <input required pattern="[0-9]+\.[0-9]+\.[0-9]+" value={bootstrapVersion} onChange={(event) => setBootstrapVersion(event.target.value)} placeholder="0.4.5" />
                     </label>
                     {["INSTALL", "UPDATE"].includes(bootstrapAction) && (
                       <>
