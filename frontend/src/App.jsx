@@ -36,6 +36,10 @@ const GENERAL_PROBLEM_PROJECT_IDS = new Set([
   "msg-60222513", "msg-602221513-2",
 ]);
 
+function isKothVm(resource) {
+  return resource.provider === "GCP" && KOTH_PROJECT_IDS.has(resource.scope_id);
+}
+
 function isPowerManagedVm(resource) {
   return resource.provider === "GCP" && !resource.retired_at && resource.account_enabled
     && (KOTH_PROJECT_IDS.has(resource.scope_id) || GENERAL_PROBLEM_PROJECT_IDS.has(resource.scope_id));
@@ -350,6 +354,13 @@ function CandidateRegistrationControl({
   submitting,
   onChange,
 }) {
+  if (isKothVm(resource)) {
+    return (
+      <div className="candidate-registration-control">
+        <StatusBadge value="TERMINATED" label="KOTH 전용 · 할당 제외" />
+      </div>
+    );
+  }
   const reasons = candidateRegistrationReasons(resource);
   const eligible = reasons.length === 0;
   const registered = resource.enabled;

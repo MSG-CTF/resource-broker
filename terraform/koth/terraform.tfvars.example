@@ -1,0 +1,11 @@
+central_service_account_email = "replace-broker-service-account@example.iam.gserviceaccount.com"
+
+project_ids = {
+  shared      = "replace-shared-project-id"
+  heavy       = "replace-dependency-project-id"
+  pixel_grand = "replace-pixel-grand-project-id"
+}
+
+enabled_project_groups = ["shared", "heavy", "pixel_grand"]
+
+enabled_shared_challenges = ["card-battle-arena", "jenga", "swanopoly"]

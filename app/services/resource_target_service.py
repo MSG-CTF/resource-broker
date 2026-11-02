@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.tables import ResourceTargetTable, RuntimeContainerTable
 from app.domain.enums import Provider
+from app.domain.koth import KOTH_GCP_PROJECT_IDS
 from app.domain.observation import OBSERVATION_CLOCK_SKEW
 from app.domain.provider_state import RUNNING_PROVIDER_INSTANCE_STATE
 from app.repositories.provider_accounts import ResourceTargetRepository
@@ -105,6 +106,11 @@ class ResourceTargetService:
         self,
         resource: ResourceTargetTable,
     ) -> None:
+        if resource.provider_scope_id in KOTH_GCP_PROJECT_IDS:
+            raise self._registration_error(
+                "KOTH_VM_EXCLUDED",
+                "KOTH VMs cannot be registered as Scheduler candidates.",
+            )
         if not resource.account.enabled:
             raise self._registration_error(
                 "PROVIDER_ACCOUNT_DISABLED",
