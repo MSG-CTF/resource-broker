@@ -33,7 +33,7 @@ const KOTH_PROJECT_IDS = new Set(["msg-60242078", "msg-60222143", "msg-60222538"
 const GENERAL_PROBLEM_PROJECT_IDS = new Set([
   "msg-60222538-2", "msg-60222143-2", "msg-60251955", "msg-60251955-512519",
   "msg-60222535", "msg-60222535-2", "msg-60222535-3", "msg-60251950",
-  "msg-60222513", "msg-602221513-2",
+  "msg-60222513", "msg-60221513-2",
 ]);
 
 function isKothVm(resource) {
@@ -1319,6 +1319,7 @@ function ResourceInventory({
     }
     return inventory;
   }, [powerGroup, provider, registrationFilter, resources, windowsOnly]);
+  const kothView = visibleResources.length > 0 && visibleResources.every(isKothVm);
   const powerResources = visibleResources.filter(isPowerManagedVm);
   const selectedPowerResources = powerResources.filter((resource) => selectedPowerIds.has(resource.resource_target_id));
 
@@ -1446,14 +1447,16 @@ function ResourceInventory({
             : "현재 등록 상태 필터에 해당하는 VM이 없습니다."}
         </div>
       ) : (
-        <div className="vm-list">
+        <div className={`vm-list${kothView ? " vm-list-koth" : ""}`}>
           <div className="vm-list-header" aria-hidden="true">
             <span>VM</span>
             <span>환경</span>
             <span>Provider 전체 사양</span>
-            <span />
-            <span>Scheduler 배치 가능량(예약 전)</span>
-            <span>VM 전체 실제 사용량</span>
+            {!kothView && <>
+              <span />
+              <span>Scheduler 배치 가능량(예약 전)</span>
+              <span>VM 전체 실제 사용량</span>
+            </>}
             <span>네트워크</span>
           </div>
           {visibleResources.map((resource) => {
@@ -1538,22 +1541,24 @@ function ResourceInventory({
                     variant="provider"
                   />
                 </div>
-                <div className="capacity-list-arrow" aria-hidden="true">→</div>
-                <div className="vm-list-capacity">
-                  {isAzureWindowsVm(resource) ? (
-                    <p>Windows 전용 VM<br />한 VM당 한 익스</p>
-                  ) : <CapacitySummary
-                    capacity={resource.allocatable_capacity}
-                    label="Scheduler 배치 가능량(예약 전)"
-                    variant="allocatable"
-                    description="Node allocatable에서 Pod requests를 뺀 값과 Provider 전체 사양에서 VM 실제 사용량을 뺀 값 중 더 작은 값입니다. Broker reservation은 아직 차감하지 않았습니다."
-                  />}
-                </div>
-                <div className="vm-list-capacity">
-                  {isAzureWindowsVm(resource)
-                    ? <p>Node Agent 설치 불필요</p>
-                    : <UsageSummary usage={resource.runtime?.usage} />}
-                </div>
+                {!kothView && <>
+                  <div className="capacity-list-arrow" aria-hidden="true">→</div>
+                  <div className="vm-list-capacity">
+                    {isAzureWindowsVm(resource) ? (
+                      <p>Windows 전용 VM<br />한 VM당 한 익스</p>
+                    ) : <CapacitySummary
+                      capacity={resource.allocatable_capacity}
+                      label="Scheduler 배치 가능량(예약 전)"
+                      variant="allocatable"
+                      description="Node allocatable에서 Pod requests를 뺀 값과 Provider 전체 사양에서 VM 실제 사용량을 뺀 값 중 더 작은 값입니다. Broker reservation은 아직 차감하지 않았습니다."
+                    />}
+                  </div>
+                  <div className="vm-list-capacity">
+                    {isAzureWindowsVm(resource)
+                      ? <p>Node Agent 설치 불필요</p>
+                      : <UsageSummary usage={resource.runtime?.usage} />}
+                  </div>
+                </>}
 
                 <section className="vm-list-network">
                   <span>
