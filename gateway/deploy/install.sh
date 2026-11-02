@@ -61,9 +61,12 @@ install -o root -g root -m 644 "$gateway_repo/gateway/deploy/msgctf-gateway.serv
 install -d -m 700 /var/backups/msgctf-gateway
 gateway_backup=$(mktemp -d /var/backups/msgctf-gateway/api.XXXXXXXX)
 cp -a /etc/nginx/conf.d/msgctf-gateway-health.conf "$gateway_backup/health.conf"
+cp -a /etc/nginx/stream-conf.d/00-msgctf-gateway.conf "$gateway_backup/stream.conf"
 install -m 644 "$gateway_repo/deploy/nginx/problem-gateway/health.conf" /etc/nginx/conf.d/msgctf-gateway-health.conf
+install -m 644 "$gateway_repo/deploy/nginx/problem-gateway/stream.conf" /etc/nginx/stream-conf.d/00-msgctf-gateway.conf
 if ! /usr/sbin/nginx -t; then
     cp -a "$gateway_backup/health.conf" /etc/nginx/conf.d/msgctf-gateway-health.conf
+    cp -a "$gateway_backup/stream.conf" /etc/nginx/stream-conf.d/00-msgctf-gateway.conf
     exit 1
 fi
 systemctl daemon-reload
