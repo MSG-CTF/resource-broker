@@ -33,7 +33,7 @@ const KOTH_PROJECT_IDS = new Set(["msg-60242078", "msg-60222143", "msg-60222538"
 const GENERAL_PROBLEM_PROJECT_IDS = new Set([
   "msg-60222538-2", "msg-60222143-2", "msg-60251955", "msg-60251955-512519",
   "msg-60222535", "msg-60222535-2", "msg-60222535-3", "msg-60251950",
-  "msg-60222513", "msg-60221513-2",
+  "msg-60222513", "msg-602221513-2",
 ]);
 
 function isKothVm(resource) {
