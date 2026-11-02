@@ -50,10 +50,13 @@ def _enum_type(enum_type: type[Any], name: str) -> SqlEnum:
 class ProviderAccountTable(Base):
     __tablename__ = "provider_accounts"
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_provider_accounts_provider_external_account_id_non_azure",
             "provider",
             "external_account_id",
-            name="uq_provider_accounts_provider_external_account_id",
+            unique=True,
+            postgresql_where=text("provider <> 'AZURE'"),
+            sqlite_where=text("provider <> 'AZURE'"),
         ),
     )
 

@@ -193,6 +193,10 @@ class ProviderAccountService:
         provider_config: dict[str, Any],
         enabled: bool,
     ) -> ProviderAccountTable:
+        if provider is Provider.AZURE and self._azure_subscription_conflict(
+            external_account_id, provider_config.get("subscription_ids", ()),
+        ):
+            raise DuplicateProviderAccountError
         auth_method = {
             Provider.GCP: "ADC",
             Provider.AWS: "GOOGLE_OIDC_STS",
@@ -223,6 +227,23 @@ class ProviderAccountService:
     def list_accounts(self) -> tuple[ProviderAccountTable, ...]:
         return self._accounts.list_all()
 
+    def _azure_subscription_conflict(
+        self, tenant_id: str, subscription_ids: tuple[str, ...] | list[str], *, exclude_account_id: UUID | None = None,
+    ) -> bool:
+        requested = {subscription_id.lower() for subscription_id in subscription_ids}
+        # shortcut: service-level scope checks can race; use a scope table if concurrent Azure account writes are needed.
+        return any(
+            account.provider is Provider.AZURE
+            and account.external_account_id.lower() == tenant_id.lower()
+            and account.account_id != exclude_account_id
+            and requested.intersection(
+                subscription_id.lower()
+                for subscription_id in (account.provider_config or {}).get("subscription_ids", ())
+                if isinstance(subscription_id, str)
+            )
+            for account in self._accounts.list_all()
+        )
+
     def configure_azure_managed_identity(
         self,
         account_id: UUID,
@@ -243,6 +264,10 @@ class ProviderAccountService:
         subscription_ids = tuple(
             dict.fromkeys(group["subscription_id"].lower() for group in resource_groups)
         )
+        if self._azure_subscription_conflict(
+            account.external_account_id, subscription_ids, exclude_account_id=account_id,
+        ):
+            raise InvalidProviderAccountConfigError("An Azure subscription is already assigned to another account.")
         previous_subscription_ids = self._subscription_ids(account)
         config = {
             "auth_method": "GOOGLE_OIDC_CLIENT_ASSERTION",

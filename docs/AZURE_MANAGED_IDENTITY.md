@@ -32,9 +32,10 @@ Admin UI → 계정 관리 → 해당 Azure 계정 → **자동 연동 설정**�
 <SUBSCRIPTION_ID>/<RESOURCE_GROUP_NAME>
 ```
 
-Azure 계정 하나는 하나의 Tenant ID를 나타낸다. 테넌트가 다르면 Broker 계정도
-각각 등록한다. 새 계정은 Tenant ID와 Subscription ID로 등록한 뒤 자동으로 열린
-Microsoft 로그인 창을 닫고 **자동 연동 설정**을 사용하면 된다. 입력한 모든
+Azure 계정 하나는 하나의 Tenant ID와 하나 이상의 Subscription ID를 나타낸다.
+같은 테넌트라도 구독 소유자가 다르면 Broker 계정을 분리할 수 있다. 이때 구독은
+두 Broker 계정에 중복 등록할 수 없다. 새 계정은 Tenant ID와 Subscription ID로
+등록한 뒤 **자동 연동 설정**을 사용한다. 입력한 모든
 그룹의 조회가 성공해야 전환된다. 실패하면 기존
 로그인 설정과 VM snapshot은 그대로 유지된다. 성공하면 같은 Broker account ID와
 VM ID를 유지하면서 조회 범위 밖의 이전 snapshot은 retired 처리한다.
@@ -65,8 +66,7 @@ VM ID를 유지하면서 조회 범위 밖의 이전 snapshot은 retired 처리�
 - `502`: Azure 범위 중 하나 이상 조회 실패. `scopes[].error_code`를 확인한다.
   이 경우 기존 계정 설정과 VM snapshot을 변경하지 않는다.
 
-기존 Azure 사용자 로그인과 Subscription 범위 Entra 앱 연동은 계속 지원한다.
-새 DB migration은 없다. 실제 token exchange와 VM 조회는 대상 Azure 환경에서
+실제 token exchange와 VM 조회는 대상 Azure 환경에서
 Verify → Sync → VM 목록으로 검증해야 한다.
 
 참고:
