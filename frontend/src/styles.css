@@ -268,7 +268,6 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 .windows-pool-card > header span:not(.status-badge):not(.status-dot) { color: #7c8799; font-size: 10px; }
 .windows-pool-meta { padding: 0 18px 14px; display: flex; flex-wrap: wrap; gap: 8px 18px; color: #7e8899; font-size: 10px; }
 .windows-pool-error { margin: 0 18px 14px; padding: 10px 12px; display: grid; gap: 3px; color: #a43d3d; background: #fff2f2; border-radius: 9px; font-size: 10px; }
-.windows-worker-empty { margin: 0; padding: 22px 18px; color: #8a95a7; border-top: 1px solid #edf0f4; font-size: 11px; text-align: center; }
 .windows-pool-card .table-wrap { border-top: 1px solid #edf0f4; }
 .windows-pool-card td > strong { color: #253047; }
 .worker-error { color: #b44343; }
@@ -341,6 +340,17 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
 .vm-list-row:last-child { border-bottom: 0; }
 .vm-list-row:hover { position: relative; z-index: 1; background: #f7faff; box-shadow: inset 3px 0 #2d63d7; }
 .vm-list-row:focus-visible { position: relative; z-index: 2; outline: 2px solid #2d63d7; outline-offset: -2px; }
+.vm-list-koth .vm-list-header,
+.vm-list-koth .vm-list-row {
+  grid-template-columns: minmax(265px, 1.3fr) minmax(170px, 0.9fr) minmax(270px, 1.2fr) minmax(170px, 0.8fr);
+}
+.vm-list-koth .vm-list-row { min-height: 92px; padding: 9px 20px; }
+.vm-list-koth .vm-list-environment,
+.vm-list-koth .vm-list-capacity,
+.vm-list-koth .vm-list-network { min-height: 0; padding-top: 3px; padding-bottom: 3px; }
+.vm-list-koth .vm-list-environment,
+.vm-list-koth .vm-list-network { gap: 6px; }
+.vm-list-koth .capacity-label { margin-bottom: 6px; }
 .vm-list-identity {
   min-width: 0;
   padding-right: 18px;
@@ -498,10 +508,10 @@ code { width: fit-content; padding: 3px 6px; color: #40516e; background: #f1f4f7
   border-bottom: 1px solid #e7ebf0;
 }
 .resource-modal-header h2 { margin: 3px 0 0; color: #17233c; font-size: 22px; letter-spacing: -0.035em; }
-.azure-login-modal { max-width: 580px; }
-.azure-login-body { display: grid; gap: 16px; }
-.azure-login-body p { line-height: 1.6; }
-.azure-login-body small { color: #667085; line-height: 1.6; }
+.azure-managed-modal { max-width: 580px; }
+.azure-managed-body { display: grid; gap: 16px; }
+.azure-managed-body p { line-height: 1.6; }
+.azure-managed-body small { color: #667085; line-height: 1.6; }
 .resource-modal-close {
   width: 36px;
   height: 36px;
@@ -720,6 +730,7 @@ footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: s
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 0;
   }
+  .vm-list-koth .vm-list-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .vm-list-identity { grid-column: 1 / -1; padding: 0 0 16px; }
   .vm-list-environment,
   .vm-list-capacity,
@@ -766,6 +777,7 @@ footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: s
   .sync-metrics div:nth-child(2) { border-right: 0; }
   .sync-metrics div:nth-child(-n + 2) { border-bottom: 1px solid #e9edf2; }
   .vm-list-row { grid-template-columns: 1fr; padding: 16px; }
+  .vm-list-koth .vm-list-row { grid-template-columns: 1fr; padding: 12px 16px; }
   .vm-list-identity { align-items: center; }
   .vm-identity h3 { font-size: 16px; }
   .vm-list-environment,
@@ -792,3 +804,13 @@ footer { padding: 23px clamp(24px, 5vw, 72px); display: flex; justify-content: s
   .runtime-container-meta code { width: 100%; }
   footer { padding: 20px; flex-direction: column; gap: 6px; }
 }
+
+.vm-power-controls { padding: 14px 20px; border-top: 1px solid #e7ebf0; display: grid; gap: 12px; }
+.vm-power-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.vm-power-actions label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.vm-power-pick { flex: 0 0 40px; width: 40px; height: 40px; display: grid; place-items: center; cursor: pointer; }
+.vm-power-pick input, .vm-power-actions input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin: 0; border-radius: 4px; accent-color: #2f65da; cursor: pointer; }
+.vm-power-result { display: inline-block; max-width: 100%; overflow-wrap: anywhere; font-size: 12px; }
+.vm-power-running { color: #855f00; }
+.vm-power-done { color: #16704b; }
+.vm-power-error { color: #ae2537; }

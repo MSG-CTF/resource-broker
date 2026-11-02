@@ -74,23 +74,16 @@ export function listProviderAccounts() {
   return request("/v1/admin/provider-accounts");
 }
 
-export function listWindowsWorkerPools({ signal } = {}) {
-  return request("/v1/admin/windows-worker-pools", { signal });
-}
-
-export function createWindowsWorkerPool(payload) {
-  return request("/v1/admin/windows-worker-pools", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
 export function listResourceTargets({ provider = "", accountId = "", signal } = {}) {
   const query = new URLSearchParams();
   if (provider) query.set("provider", provider);
   if (accountId) query.set("account_id", accountId);
   query.set("limit", "500");
   return request(`/v1/admin/resource-targets?${query.toString()}`, { signal });
+}
+
+export function listWindowsVmStatuses({ signal } = {}) {
+  return request("/v1/admin/windows-vms", { signal });
 }
 
 export function updateResourceTargetCandidateRegistration(
@@ -104,6 +97,18 @@ export function updateResourceTargetCandidateRegistration(
       body: JSON.stringify({ enabled }),
     },
   );
+}
+
+export function setVmPower(resourceTargetId, action) {
+  return request(`/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/power`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
+export function getVmPowerOperation(resourceTargetId, operationName, action) {
+  const query = new URLSearchParams({ action });
+  return request(`/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/power-operations/${encodeURIComponent(operationName)}?${query}`);
 }
 
 export function listResourceTargetContainers(resourceTargetId, { signal } = {}) {
@@ -135,19 +140,6 @@ export function createProviderAccount(payload) {
     method: "POST",
     body: JSON.stringify(payload),
   });
-}
-
-export function connectAzureUserLogin(accountId, accessToken, expiresOn, { signal } = {}) {
-  return request(`/v1/admin/provider-accounts/${encodeURIComponent(accountId)}/azure-login`, {
-    method: "POST",
-    headers: { "X-Azure-Access-Token": accessToken },
-    body: JSON.stringify({ expires_on: expiresOn }),
-    signal,
-  });
-}
-
-export function getAzureUserLogin(accountId, { signal } = {}) {
-  return request(`/v1/admin/provider-accounts/${encodeURIComponent(accountId)}/azure-login`, { signal });
 }
 
 export function configureAzureManagedIdentity(accountId, payload) {

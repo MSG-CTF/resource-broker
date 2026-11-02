@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AzureWindowsVm from "./AzureWindowsVm.jsx";
-import AzureAccountLogin from "./AzureAccountLogin.jsx";
 import AzureManagedIdentitySetup from "./AzureManagedIdentitySetup.jsx";
 
 import {
@@ -9,17 +8,18 @@ import {
   clearAdminToken,
   createBootstrapJob,
   createProviderAccount,
-  createWindowsWorkerPool,
   deleteProviderAccount,
   getGcpCreditEstimate,
+  getVmPowerOperation,
   getAdminToken,
   listBootstrapJobs,
   listProviderAccounts,
   listResourceTargetContainers,
   listResourceTargets,
-  listWindowsWorkerPools,
+  listWindowsVmStatuses,
   loginAdmin,
   setAdminToken,
+  setVmPower,
   syncProviderAccount,
   updateGcpCreditSettings,
   updateResourceTargetCandidateRegistration,
@@ -27,6 +27,21 @@ import {
 } from "./api/providerAccounts.js";
 
 const CANDIDATE_OBSERVATION_STALE_MS = 10 * 60 * 1000;
+const KOTH_PROJECT_IDS = new Set(["msg-60242078", "msg-60222143", "msg-60222538"]);
+const GENERAL_PROBLEM_PROJECT_IDS = new Set([
+  "msg-60222538-2", "msg-60222143-2", "msg-60251955", "msg-60251955-512519",
+  "msg-60222535", "msg-60222535-2", "msg-60222535-3", "msg-60251950",
+  "msg-60222513", "msg-602221513-2",
+]);
+
+function isKothVm(resource) {
+  return resource.provider === "GCP" && KOTH_PROJECT_IDS.has(resource.scope_id);
+}
+
+function isPowerManagedVm(resource) {
+  return resource.provider === "GCP" && !resource.retired_at && resource.account_enabled
+    && (KOTH_PROJECT_IDS.has(resource.scope_id) || GENERAL_PROBLEM_PROJECT_IDS.has(resource.scope_id));
+}
 
 const PROVIDER_DEFINITIONS = {
   GCP: {
@@ -95,6 +110,14 @@ const PROVIDER_DEFINITIONS = {
     accountHelp: "Azure 계정을 대표하는 Microsoft Entra Tenant ID입니다.",
     configFields: [
       {
+        name: "clientId",
+        configKey: "client_id",
+        label: "관리 ID Client ID",
+        placeholder: "00000000-0000-0000-0000-000000000000",
+        help: "Broker GCP 서비스 계정을 신뢰하도록 설정한 Azure 사용자 할당 관리 ID의 Client ID입니다.",
+        kind: "text",
+      },
+      {
         name: "subscriptionIds",
         configKey: "subscription_ids",
         label: "Subscription IDs",
@@ -152,10 +175,7 @@ function buildProviderConfig(provider, configValues) {
     if (field.required === false && !value) return [];
     return [[field.configKey, value]];
   });
-  return {
-    ...Object.fromEntries(entries),
-    ...(provider === "AZURE" ? { auth_method: "USER_BROWSER" } : {}),
-  };
+  return Object.fromEntries(entries);
 }
 
 function accountScopes(account) {
@@ -285,7 +305,7 @@ function candidateRegistrationReasons(resource) {
   if (resource.status !== "RUNNING") {
     reasons.push("PROVIDER_INSTANCE_NOT_RUNNING");
   }
-  if (isAzureWindowsVm(resource)) return reasons;
+  if (resource.manual_candidate_registration || isAzureWindowsVm(resource)) return reasons;
   if (!resource.runtime?.ready) reasons.push("RUNTIME_NOT_READY");
   if (!resource.architecture) reasons.push("ARCHITECTURE_NOT_OBSERVED");
   if (!resource.runtime?.type || !resource.runtime?.target_id) {
@@ -337,6 +357,13 @@ function CandidateRegistrationControl({
   submitting,
   onChange,
 }) {
+  if (isKothVm(resource)) {
+    return (
+      <div className="candidate-registration-control">
+        <StatusBadge value="TERMINATED" label="KOTH 전용 · 할당 제외" />
+      </div>
+    );
+  }
   const reasons = candidateRegistrationReasons(resource);
   const eligible = reasons.length === 0;
   const registered = resource.enabled;
@@ -357,13 +384,16 @@ function CandidateRegistrationControl({
         value={registered ? (eligible ? "AVAILABLE" : "UNKNOWN") : "TERMINATED"}
         label={label}
       />
+      {resource.manual_candidate_registration && (
+        <span className="candidate-registration-reason">수동 등록 · 자동 배치는 실행 정보 확인 후 가능</span>
+      )}
       {reasonText && (
         <span className="candidate-registration-reason" title={reasonText}>
           {reasonText}
         </span>
       )}
       {isAzureWindowsVm(resource) && (
-        <span className="candidate-registration-reason">Node Agent 없이 등록 · 실행 상태는 Runtime 연동 후 표시</span>
+        <span className="candidate-registration-reason">Node Agent 없이 등록</span>
       )}
       <button
         className={`button ${registered ? "button-ghost" : "button-primary"}`}
@@ -407,6 +437,25 @@ function StatusBadge({ value, label }) {
       {label || STATUS_LABELS[value] || value}
     </span>
   );
+}
+
+function WindowsExecutionStatus({ connection, loading, error }) {
+  const state = connection?.state;
+  const label = error
+    ? "익스 상태 조회 실패"
+    : loading
+      ? "익스 상태 조회 중"
+      : state === "RUNNING"
+        ? "익스 실행 중"
+        : state === "RESET_REQUIRED"
+          ? "익스 종료 · 초기화 필요"
+          : connection?.enabled === false
+            ? "RDP 연결 비활성"
+            : state === "READY"
+              ? "익스 대기"
+              : "RDP 연결 미설정";
+  const badgeState = state === "READY" && connection?.enabled === false ? "UNAVAILABLE" : state || "UNKNOWN";
+  return <StatusBadge value={badgeState} label={label} />;
 }
 
 function ErrorBanner({ error, onClose }) {
@@ -625,7 +674,7 @@ function RegisterForm({ onCreated }) {
         <div className="config-divider">
           <span>{definition.shortLabel} 설정</span>
           <small>{form.provider === "AZURE"
-            ? "등록 후 Microsoft 계정을 연결하면 해당 계정 권한으로 VM을 조회합니다."
+            ? "GCP 서비스 계정과 연동된 Azure 관리 ID로 조회합니다. 리소스 그룹 권한만 있다면 등록 후 자동 연동 설정에서 그룹을 지정하세요."
             : "클라우드에서 조회할 범위를 입력하세요."}</small>
         </div>
 
@@ -683,7 +732,6 @@ function AccountTable({
   onSync,
   onCredit,
   onDelete,
-  onAzureLogin,
   onAzureManagedIdentity,
 }) {
   if (accounts.length === 0) {
@@ -712,7 +760,9 @@ function AccountTable({
           {accounts.map((account) => {
             const definition =
               PROVIDER_DEFINITIONS[account.provider] || PROVIDER_DEFINITIONS.GCP;
-            const isImplemented = ACTIVE_PROVIDERS.has(account.provider);
+            const needsFederation = account.provider === "AZURE"
+              && ["USER_BROWSER", "USER_DEVICE_CODE"].includes(account.config?.auth_method);
+            const isImplemented = ACTIVE_PROVIDERS.has(account.provider) && !needsFederation;
             const isVerifying = actionState === `verify:${account.account_id}`;
             const isSyncing = actionState === `sync:${account.account_id}`;
             const isCheckingCredit =
@@ -731,6 +781,7 @@ function AccountTable({
                       </strong>
                       <span>{account.external_account_id}</span>
                       <span className="provider-name">{definition.label}</span>
+                      {needsFederation && <em>자동 연동 설정 필요</em>}
                       {account.provider === "AWS" && (
                         <details className="aws-onboarding-values">
                           <summary>AWS 연결 값</summary>
@@ -767,11 +818,6 @@ function AccountTable({
                 </td>
                 <td>
                   <div className="row-actions">
-                    {account.provider === "AZURE" && ["USER_BROWSER", "USER_DEVICE_CODE"].includes(account.config?.auth_method) && (
-                      <button className="button button-secondary" type="button" disabled={Boolean(actionState)} onClick={() => onAzureLogin(account)}>
-                        Microsoft 계정 연결
-                      </button>
-                    )}
                     {account.provider === "AZURE" && (
                       <button className="button button-secondary" type="button" disabled={Boolean(actionState)} onClick={() => onAzureManagedIdentity(account)}>
                         자동 연동 설정
@@ -781,7 +827,7 @@ function AccountTable({
                       className="button button-secondary"
                       type="button"
                       disabled={!isImplemented || Boolean(actionState)}
-                      title={isImplemented ? "인증과 권한 검증" : "어댑터 준비 중"}
+                      title={needsFederation ? "자동 연동 설정을 먼저 완료하세요" : isImplemented ? "인증과 권한 검증" : "어댑터 준비 중"}
                       onClick={() => onVerify(account)}
                     >
                       {isVerifying ? "검증 중..." : "Verify"}
@@ -790,7 +836,7 @@ function AccountTable({
                       className="button button-primary"
                       type="button"
                       disabled={!isImplemented || Boolean(actionState)}
-                      title={isImplemented ? "VM 목록 동기화" : "어댑터 준비 중"}
+                      title={needsFederation ? "자동 연동 설정을 먼저 완료하세요" : isImplemented ? "VM 목록 동기화" : "어댑터 준비 중"}
                       onClick={() => onSync(account)}
                     >
                       {isSyncing ? "동기화 중..." : "Sync"}
@@ -815,7 +861,7 @@ function AccountTable({
                     >
                       {isDeleting ? "삭제 중..." : "삭제"}
                     </button>
-                    {!isImplemented && <small className="adapter-pending">준비 중</small>}
+                    {!isImplemented && !needsFederation && <small className="adapter-pending">준비 중</small>}
                   </div>
                 </td>
               </tr>
@@ -1124,6 +1170,8 @@ function SyncResult({ result, accountName }) {
 
 function ResourceInventory({
   windowsOnly = false,
+  windowsStatuses,
+  windowsStatusError,
   accounts,
   resources,
   loading,
@@ -1144,12 +1192,16 @@ function ResourceInventory({
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapError, setBootstrapError] = useState(null);
   const [bootstrapAction, setBootstrapAction] = useState("INSTALL");
-  const [bootstrapVersion, setBootstrapVersion] = useState("0.4.3");
+  const [bootstrapVersion, setBootstrapVersion] = useState("0.4.5");
   const [k3sVersion, setK3sVersion] = useState("v1.36.4+k3s1");
   const [agentImage, setAgentImage] = useState("");
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
   const [bootstrapReloadKey, setBootstrapReloadKey] = useState(0);
   const [registrationFilter, setRegistrationFilter] = useState("");
+  const [powerGroup, setPowerGroup] = useState("general");
+  const [selectedPowerIds, setSelectedPowerIds] = useState(new Set());
+  const [powerStates, setPowerStates] = useState({});
+  const [powerBusy, setPowerBusy] = useState(false);
 
   useEffect(() => {
     if (!selectedResource) return undefined;
@@ -1278,7 +1330,11 @@ function ResourceInventory({
           ? "AWS Region"
           : "Scope ID";
   const visibleResources = useMemo(() => {
-    const inventory = windowsOnly ? resources.filter(isAzureWindowsVm) : resources;
+    const inventory = windowsOnly ? resources.filter(isAzureWindowsVm) : resources.filter((resource) => (
+      resource.provider === "GCP"
+        ? (powerGroup === "koth" ? KOTH_PROJECT_IDS : GENERAL_PROBLEM_PROJECT_IDS).has(resource.scope_id)
+        : provider === resource.provider
+    ));
     if (registrationFilter === "registered") {
       return inventory.filter((resource) => resource.enabled);
     }
@@ -1286,7 +1342,35 @@ function ResourceInventory({
       return inventory.filter((resource) => !resource.enabled);
     }
     return inventory;
-  }, [registrationFilter, resources, windowsOnly]);
+  }, [powerGroup, provider, registrationFilter, resources, windowsOnly]);
+  const kothView = visibleResources.length > 0 && visibleResources.every(isKothVm);
+  const powerResources = visibleResources.filter(isPowerManagedVm);
+  const selectedPowerResources = powerResources.filter((resource) => selectedPowerIds.has(resource.resource_target_id));
+
+  async function changePower(action) {
+    const expectedStatus = action === "START" ? "TERMINATED" : "RUNNING";
+    const targets = selectedPowerResources.filter((resource) => resource.status === expectedStatus);
+    if (!targets.length || !window.confirm(`선택한 ${targets.length}개 GCP 문제 VM을 ${action === "START" ? "시작" : "중지"}할까요?${action === "STOP" ? "\n실행 중인 문제 서비스가 중단됩니다." : ""}`)) return;
+    setPowerBusy(true);
+    await Promise.all(targets.map(async (resource) => {
+      const id = resource.resource_target_id;
+      setPowerStates((current) => ({ ...current, [id]: { status: "RUNNING", message: "진행 중" } }));
+      try {
+        let result = await setVmPower(id, action);
+        const deadline = Date.now() + 5 * 60 * 1000;
+        while (result.status === "RUNNING" && Date.now() < deadline) {
+          await new Promise((resolve) => window.setTimeout(resolve, 3000));
+          result = await getVmPowerOperation(id, result.operation_name, action);
+        }
+        if (result.status !== "DONE") throw new Error("5분 안에 완료 상태를 확인하지 못했습니다. 새로고침 후 실제 VM 상태를 확인하세요.");
+        setPowerStates((current) => ({ ...current, [id]: { status: "DONE", message: "완료" } }));
+      } catch (requestError) {
+        setPowerStates((current) => ({ ...current, [id]: { status: "ERROR", message: `오류: ${requestError.message}` } }));
+      }
+    }));
+    setPowerBusy(false);
+    await onRefresh();
+  }
 
   return (
     <section className="panel resources-panel" aria-labelledby="inventory-title">
@@ -1330,6 +1414,29 @@ function ResourceInventory({
         ))}
       </div>}
 
+      {!windowsOnly && <div className="vm-power-controls">
+        <div className="inventory-provider-filters" role="group" aria-label="문제 유형 필터">
+          <span>문제 유형</span>
+          {[["general", "일반 문제"], ["koth", "KOTH"]].map(([value, label]) => (
+            <button key={value} type="button" className={powerGroup === value ? "is-active" : ""}
+              aria-pressed={powerGroup === value} onClick={() => setPowerGroup(value)}>{label}</button>
+          ))}
+        </div>
+        <div className="vm-power-actions">
+          <label><input type="checkbox" checked={powerResources.length > 0 && powerResources.every((resource) => selectedPowerIds.has(resource.resource_target_id))}
+            onChange={(event) => setSelectedPowerIds((current) => {
+              const next = new Set(current);
+              powerResources.forEach((resource) => event.target.checked ? next.add(resource.resource_target_id) : next.delete(resource.resource_target_id));
+              return next;
+            })} /> 표시된 GCP 문제 VM 전체 선택</label>
+          <span>{selectedPowerResources.length}개 선택</span>
+          <button className="button button-ghost" type="button" disabled={powerBusy || !selectedPowerResources.some((resource) => resource.status === "TERMINATED")}
+            onClick={() => changePower("START")}>선택 VM 시작</button>
+          <button className="button button-ghost" type="button" disabled={powerBusy || !selectedPowerResources.some((resource) => resource.status === "RUNNING")}
+            onClick={() => changePower("STOP")}>선택 VM 중지</button>
+        </div>
+      </div>}
+
       <div className="inventory-provider-filters inventory-account-filters" role="group" aria-label="계정 표시 이름 필터">
         <span>계정</span>
         <button className={!accountId ? "is-active" : ""} type="button" aria-pressed={!accountId} onClick={() => onAccountChange("")}>
@@ -1364,14 +1471,16 @@ function ResourceInventory({
             : "현재 등록 상태 필터에 해당하는 VM이 없습니다."}
         </div>
       ) : (
-        <div className="vm-list">
+        <div className={`vm-list${kothView ? " vm-list-koth" : ""}`}>
           <div className="vm-list-header" aria-hidden="true">
             <span>VM</span>
             <span>환경</span>
             <span>Provider 전체 사양</span>
-            <span />
-            <span>Scheduler 배치 가능량(예약 전)</span>
-            <span>VM 전체 실제 사용량</span>
+            {!kothView && <>
+              <span />
+              <span>Scheduler 배치 가능량(예약 전)</span>
+              <span>VM 전체 실제 사용량</span>
+            </>}
             <span>네트워크</span>
           </div>
           {visibleResources.map((resource) => {
@@ -1396,7 +1505,17 @@ function ResourceInventory({
               >
                 <section className="vm-list-identity">
                   <div className="vm-identity">
-                    <div className="provider-avatar">{definition.avatar}</div>
+                    {!windowsOnly && isPowerManagedVm(resource) ? (
+                      <label className="vm-power-pick" title="VM 전원 선택" onClick={(event) => event.stopPropagation()}>
+                        <input type="checkbox" aria-label={`${resource.name || resource.instance_id} 전원 선택`}
+                          checked={selectedPowerIds.has(resource.resource_target_id)} disabled={powerBusy}
+                          onChange={(event) => setSelectedPowerIds((current) => {
+                            const next = new Set(current);
+                            event.target.checked ? next.add(resource.resource_target_id) : next.delete(resource.resource_target_id);
+                            return next;
+                          })} />
+                      </label>
+                    ) : <div className="provider-avatar">{definition.avatar}</div>}
                     <div>
                       <span className="vm-provider">{definition.label}</span>
                       <h3>{resource.name || "이름 없는 VM"}</h3>
@@ -1408,7 +1527,19 @@ function ResourceInventory({
                   </div>
                   <div className="vm-status">
                     <StatusBadge value={resource.status || "UNKNOWN"} />
+                    {powerStates[resource.resource_target_id] && (
+                      <span className={`vm-power-result vm-power-${powerStates[resource.resource_target_id].status.toLowerCase()}`} role="status">
+                        {powerStates[resource.resource_target_id].message}
+                      </span>
+                    )}
                     {resource.retired_at && <span>Retired</span>}
+                    {isAzureWindowsVm(resource) && (
+                      <WindowsExecutionStatus
+                        connection={windowsStatuses?.[resource.resource_target_id]}
+                        loading={!windowsStatuses && !windowsStatusError}
+                        error={windowsStatusError}
+                      />
+                    )}
                     <CandidateRegistrationControl
                       resource={resource}
                       submitting={
@@ -1441,22 +1572,24 @@ function ResourceInventory({
                     variant="provider"
                   />
                 </div>
-                <div className="capacity-list-arrow" aria-hidden="true">→</div>
-                <div className="vm-list-capacity">
-                  {isAzureWindowsVm(resource) ? (
-                    <p>Windows 전용 VM<br />한 VM당 한 익스</p>
-                  ) : <CapacitySummary
-                    capacity={resource.allocatable_capacity}
-                    label="Scheduler 배치 가능량(예약 전)"
-                    variant="allocatable"
-                    description="Node allocatable에서 Pod requests를 뺀 값과 Provider 전체 사양에서 VM 실제 사용량을 뺀 값 중 더 작은 값입니다. Broker reservation은 아직 차감하지 않았습니다."
-                  />}
-                </div>
-                <div className="vm-list-capacity">
-                  {isAzureWindowsVm(resource)
-                    ? <p>Node Agent 설치 불필요</p>
-                    : <UsageSummary usage={resource.runtime?.usage} />}
-                </div>
+                {!kothView && <>
+                  <div className="capacity-list-arrow" aria-hidden="true">→</div>
+                  <div className="vm-list-capacity">
+                    {isAzureWindowsVm(resource) ? (
+                      <p>Windows 전용 VM<br />한 VM당 한 익스</p>
+                    ) : <CapacitySummary
+                      capacity={resource.allocatable_capacity}
+                      label="Scheduler 배치 가능량(예약 전)"
+                      variant="allocatable"
+                      description="Node allocatable에서 Pod requests를 뺀 값과 Provider 전체 사양에서 VM 실제 사용량을 뺀 값 중 더 작은 값입니다. Broker reservation은 아직 차감하지 않았습니다."
+                    />}
+                  </div>
+                  <div className="vm-list-capacity">
+                    {isAzureWindowsVm(resource)
+                      ? <p>Node Agent 설치 불필요</p>
+                      : <UsageSummary usage={resource.runtime?.usage} />}
+                  </div>
+                </>}
 
                 <section className="vm-list-network">
                   <span>
@@ -1539,7 +1672,14 @@ function ResourceInventory({
               </dl>
 
               {isAzureWindowsVm(selectedResource) ? (
-                <p>Windows VM은 Node Agent 없이 등록합니다. 익스 실행·완료 상태와 초기화는 Runtime 연동 후 확인합니다.</p>
+                <div className="resource-detail-primary">
+                  <span>익스 상태</span>
+                  <WindowsExecutionStatus
+                    connection={windowsStatuses?.[selectedResource.resource_target_id]}
+                    loading={!windowsStatuses && !windowsStatusError}
+                    error={windowsStatusError}
+                  />
+                </div>
               ) : <>
               <section className="bootstrap-jobs" aria-labelledby="bootstrap-jobs-title">
                 <header className="bootstrap-jobs-header">
@@ -1572,7 +1712,7 @@ function ResourceInventory({
                     </label>
                     <label>
                       <span>Bootstrap 버전</span>
-                      <input required pattern="[0-9]+\.[0-9]+\.[0-9]+" value={bootstrapVersion} onChange={(event) => setBootstrapVersion(event.target.value)} placeholder="0.4.3" />
+                      <input required pattern="[0-9]+\.[0-9]+\.[0-9]+" value={bootstrapVersion} onChange={(event) => setBootstrapVersion(event.target.value)} placeholder="0.4.5" />
                     </label>
                     {["INSTALL", "UPDATE"].includes(bootstrapAction) && (
                       <>
@@ -1725,230 +1865,14 @@ function ResourceInventory({
   );
 }
 
-const EMPTY_WINDOWS_POOL_FORM = {
-  displayName: "",
-  projectId: "",
-  zone: "",
-  managedInstanceGroup: "",
-};
-
-function WindowsWorkerRegisterForm({ onCreated }) {
-  const [form, setForm] = useState(EMPTY_WINDOWS_POOL_FORM);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-
-  function updateField(event) {
-    const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
-  }
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    try {
-      const pool = await createWindowsWorkerPool({
-        project_id: form.projectId.trim(),
-        zone: form.zone.trim(),
-        managed_instance_group: form.managedInstanceGroup.trim(),
-        display_name: form.displayName.trim() || null,
-      });
-      setForm(EMPTY_WINDOWS_POOL_FORM);
-      await onCreated(pool);
-    } catch (requestError) {
-      setError(requestError);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <section className="panel register-panel" aria-labelledby="windows-register-title">
-      <div className="panel-heading">
-        <div>
-          <span className="eyebrow">GCP managed instance group</span>
-          <h2 id="windows-register-title">Worker Pool 등록</h2>
-        </div>
-      </div>
-      <ErrorBanner error={error} onClose={() => setError(null)} />
-      <form className="register-form" onSubmit={handleSubmit}>
-        <label>
-          <span>표시 이름 (선택)</span>
-          <input
-            name="displayName"
-            value={form.displayName}
-            placeholder="예: Windows 경기장"
-            onChange={updateField}
-          />
-        </label>
-        <label>
-          <span>GCP 프로젝트 ID</span>
-          <input
-            name="projectId"
-            value={form.projectId}
-            placeholder="예: windows-worker-project"
-            required
-            onChange={updateField}
-          />
-        </label>
-        <label>
-          <span>Zone</span>
-          <input
-            name="zone"
-            value={form.zone}
-            placeholder="예: us-central1-a"
-            required
-            onChange={updateField}
-          />
-        </label>
-        <label>
-          <span>MIG 이름</span>
-          <input
-            name="managedInstanceGroup"
-            value={form.managedInstanceGroup}
-            placeholder="예: windows-workers"
-            required
-            onChange={updateField}
-          />
-          <small>등록 후 Broker가 MIG health 상태와 인스턴스를 동기화합니다.</small>
-        </label>
-        <button className="button button-primary button-block" type="submit" disabled={submitting}>
-          {submitting ? "등록 중..." : "Worker Pool 등록"}
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function WindowsWorkerManagement({ pools, loading, onCreated, onRefresh }) {
-  const workers = pools.flatMap((pool) => pool.workers);
-  const count = (status) => workers.filter((worker) => worker.status === status).length;
-  const metrics = [
-    ["전체 Worker", workers.length, "등록된 MIG 인스턴스"],
-    ["사용 가능", count("READY"), "READY"],
-    ["사용 중", count("LEASED"), "LEASED"],
-    ["재생성 중", count("RECREATING"), "RECREATING"],
-    ["준비 중", count("PROVISIONING"), "PROVISIONING"],
-    ["오류", count("FAILED"), "FAILED"],
-  ];
-
-  return (
-    <>
-      <div className="view-title">
-        <div>
-          <span className="eyebrow">Windows worker control plane</span>
-          <h1>GCP Windows Worker</h1>
-        </div>
-        <span>MIG 상태 10초마다 자동 갱신</span>
-      </div>
-
-      <section className="metric-grid metric-grid-windows" aria-label="Windows Worker 요약">
-        {metrics.map(([label, value, help]) => (
-          <article key={label}>
-            <span>{label}</span>
-            <strong>{value}</strong>
-            <small>{help}</small>
-          </article>
-        ))}
-      </section>
-
-      <div className="workspace-grid">
-        <WindowsWorkerRegisterForm onCreated={onCreated} />
-
-        <section className="panel windows-pools-panel" aria-labelledby="windows-pools-title">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">Worker inventory</span>
-              <h2 id="windows-pools-title">등록된 Worker Pool</h2>
-            </div>
-            <button className="button button-ghost" type="button" onClick={onRefresh}>
-              새로고침
-            </button>
-          </div>
-
-          {loading ? (
-            <div className="loading-state">Windows Worker 목록을 불러오는 중입니다...</div>
-          ) : pools.length === 0 ? (
-            <div className="empty-state">
-              <span>W</span>
-              <h3>등록된 Worker Pool이 없습니다.</h3>
-              <p>왼쪽에서 GCP MIG를 등록하면 Worker 상태가 여기에 표시됩니다.</p>
-            </div>
-          ) : (
-            <div className="windows-pool-list">
-              {pools.map((pool) => (
-                <article className="windows-pool-card" key={pool.pool_id}>
-                  <header>
-                    <div>
-                      <strong>{pool.display_name || pool.managed_instance_group}</strong>
-                      <span>{pool.project_id} · {pool.zone}</span>
-                    </div>
-                    <StatusBadge
-                      value={pool.error_code ? "FAILED" : pool.last_synced_at ? "READY" : "PROVISIONING"}
-                      label={pool.error_code ? "동기화 오류" : pool.last_synced_at ? "동기화됨" : "동기화 대기"}
-                    />
-                  </header>
-                  <div className="windows-pool-meta">
-                    <span>MIG <code>{pool.managed_instance_group}</code></span>
-                    <span>최근 동기화 {formatDate(pool.last_synced_at)}</span>
-                  </div>
-                  {pool.error_message && (
-                    <div className="windows-pool-error" role="alert">
-                      <strong>{pool.error_code}</strong>
-                      <span>{pool.error_message}</span>
-                    </div>
-                  )}
-
-                  {pool.workers.length === 0 ? (
-                    <p className="windows-worker-empty">아직 동기화된 Worker가 없습니다.</p>
-                  ) : (
-                    <div className="table-wrap">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Worker</th>
-                            <th>Private IP</th>
-                            <th>상태</th>
-                            <th>Instance ID</th>
-                            <th>최근 확인</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {pool.workers.map((worker) => (
-                            <tr key={worker.worker_id}>
-                              <td><strong>{worker.instance_name}</strong></td>
-                              <td><code>{worker.private_ip || "미할당"}</code></td>
-                              <td><StatusBadge value={worker.status} /></td>
-                              <td><code>{worker.instance_id || "미수집"}</code></td>
-                              <td className="date-cell">
-                                <span>{formatDate(worker.last_seen_at)}</span>
-                                {worker.error_message && <span className="worker-error">{worker.error_message}</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-    </>
-  );
-}
-
 function AdminDashboard({ onLogout }) {
   const [activeView, setActiveView] = useState("accounts");
   const [accounts, setAccounts] = useState([]);
   const [resources, setResources] = useState([]);
-  const [windowsPools, setWindowsPools] = useState([]);
-  const [windowsPoolsSupported, setWindowsPoolsSupported] = useState(false);
+  const [windowsStatuses, setWindowsStatuses] = useState(null);
+  const [windowsStatusError, setWindowsStatusError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [resourceLoading, setResourceLoading] = useState(true);
-  const [windowsLoading, setWindowsLoading] = useState(true);
   const [resourceProvider, setResourceProvider] = useState("");
   const [resourceAccountId, setResourceAccountId] = useState("");
   const [connected, setConnected] = useState(false);
@@ -1961,7 +1885,6 @@ function AdminDashboard({ onLogout }) {
   const [creditEstimate, setCreditEstimate] = useState(null);
   const [creditLoading, setCreditLoading] = useState(false);
   const [creditError, setCreditError] = useState(null);
-  const [azureLoginAccount, setAzureLoginAccount] = useState(null);
   const [azureManagedAccount, setAzureManagedAccount] = useState(null);
 
   const loadAccounts = useCallback(async () => {
@@ -1998,23 +1921,15 @@ function AdminDashboard({ onLogout }) {
     }
   }, [resourceProvider, resourceAccountId]);
 
-  const loadWindowsPools = useCallback(async (showLoading = true) => {
-    if (showLoading) setWindowsLoading(true);
+  const loadWindowsStatuses = useCallback(async ({ signal } = {}) => {
     try {
-      const response = await listWindowsWorkerPools();
-      setWindowsPools(response.items);
-      setWindowsPoolsSupported(true);
-      setConnected(true);
-      setError(null);
+      const response = await listWindowsVmStatuses({ signal });
+      setWindowsStatuses(Object.fromEntries(response.items.map((item) => [item.resource_target_id, item])));
+      setWindowsStatusError(false);
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 404) {
-        setWindowsPoolsSupported(false);
-        return;
-      }
-      setConnected(false);
-      setError(requestError);
-    } finally {
-      if (showLoading) setWindowsLoading(false);
+      if (requestError.name === "AbortError") return;
+      setWindowsStatuses(null);
+      setWindowsStatusError(true);
     }
   }, []);
 
@@ -2029,14 +1944,16 @@ function AdminDashboard({ onLogout }) {
   }, [loadResources]);
 
   useEffect(() => {
-    loadWindowsPools();
-  }, [loadWindowsPools]);
-
-  useEffect(() => {
-    if (activeView !== "windows") return undefined;
-    const intervalId = window.setInterval(() => loadWindowsPools(false), 10_000);
-    return () => window.clearInterval(intervalId);
-  }, [activeView, loadWindowsPools]);
+    if (activeView !== "azure-windows" && activeView !== "resources") return undefined;
+    const controller = new AbortController();
+    const refresh = () => loadWindowsStatuses({ signal: controller.signal });
+    refresh();
+    const intervalId = window.setInterval(refresh, 10_000);
+    return () => {
+      window.clearInterval(intervalId);
+      controller.abort();
+    };
+  }, [activeView, loadWindowsStatuses]);
 
   const metrics = useMemo(() => {
     const healthy = accounts.filter(
@@ -2059,14 +1976,6 @@ function AdminDashboard({ onLogout }) {
   async function handleCreated(account) {
     setNotice(`${account.display_name || account.external_account_id} 계정을 등록했습니다.`);
     await loadAccounts();
-    if (account.provider === "AZURE" && ["USER_BROWSER", "USER_DEVICE_CODE"].includes(account.config?.auth_method)) {
-      setAzureLoginAccount(account);
-    }
-  }
-
-  async function handleWindowsPoolCreated(pool) {
-    setNotice(`${pool.display_name || pool.managed_instance_group} Worker Pool을 등록했습니다.`);
-    await loadWindowsPools(false);
   }
 
   async function handleVerify(account) {
@@ -2114,11 +2023,6 @@ function AdminDashboard({ onLogout }) {
       setActionState(null);
     }
   }, [loadAccounts, loadResources]);
-
-  const handleAzureConnected = useCallback(async (account) => {
-    setAzureLoginAccount(null);
-    await handleSync(account);
-  }, [handleSync]);
 
   async function handleAzureManagedSaved(account, result) {
     setAzureManagedAccount(null);
@@ -2329,18 +2233,6 @@ function AdminDashboard({ onLogout }) {
               <small>Azure Windows VM 관리</small>
             </span>
           </button>
-          {windowsPoolsSupported && <button
-            className={`file-tab ${activeView === "windows" ? "is-active" : ""}`}
-            type="button"
-            aria-current={activeView === "windows" ? "page" : undefined}
-            onClick={() => setActiveView("windows")}
-          >
-            <span className="file-icon" aria-hidden="true" />
-            <span>
-              <strong>GCP Windows Worker</strong>
-              <small>{windowsPools.reduce((sum, pool) => sum + pool.workers.length, 0)} workers</small>
-            </span>
-          </button>}
         </nav>
 
         <div className="view-surface">
@@ -2392,7 +2284,6 @@ function AdminDashboard({ onLogout }) {
                       onSync={handleSync}
                       onCredit={handleCredit}
                       onDelete={handleDelete}
-                      onAzureLogin={setAzureLoginAccount}
                       onAzureManagedIdentity={setAzureManagedAccount}
                     />
                   )}
@@ -2413,6 +2304,8 @@ function AdminDashboard({ onLogout }) {
               <ResourceInventory
                 accounts={accounts}
                 resources={resources}
+                windowsStatuses={windowsStatuses}
+                windowsStatusError={windowsStatusError}
                 loading={resourceLoading}
                 provider={resourceProvider}
                 accountId={resourceAccountId}
@@ -2426,40 +2319,29 @@ function AdminDashboard({ onLogout }) {
                 onRefresh={loadResources}
               />
             </>
-          ) : activeView === "azure-windows" ? (
+          ) : (
             <AzureWindowsVm>
               <ResourceInventory
                 windowsOnly
                 accounts={accounts}
                 resources={resources}
+                windowsStatuses={windowsStatuses}
+                windowsStatusError={windowsStatusError}
                 loading={resourceLoading}
                 provider="AZURE"
                 accountId={resourceAccountId}
                 actionState={actionState}
                 onAccountChange={setResourceAccountId}
                 onCandidateRegistrationChange={handleCandidateRegistration}
-                onRefresh={loadResources}
+                onRefresh={() => {
+                  loadResources();
+                  loadWindowsStatuses();
+                }}
               />
             </AzureWindowsVm>
-          ) : (
-            <WindowsWorkerManagement
-              pools={windowsPools}
-              loading={windowsLoading}
-              onCreated={handleWindowsPoolCreated}
-              onRefresh={() => loadWindowsPools()}
-            />
           )}
         </div>
       </main>
-
-      {azureLoginAccount && (
-        <AzureAccountLogin
-          key={azureLoginAccount.account_id}
-          account={azureLoginAccount}
-          onClose={() => setAzureLoginAccount(null)}
-          onConnected={handleAzureConnected}
-        />
-      )}
 
       {azureManagedAccount && (
         <AzureManagedIdentitySetup

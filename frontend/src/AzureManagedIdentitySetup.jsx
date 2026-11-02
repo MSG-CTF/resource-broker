@@ -59,12 +59,12 @@ export default function AzureManagedIdentitySetup({ account, onClose, onSaved })
 
   return (
     <div className="resource-modal-backdrop" onKeyDown={handleKeyDown}>
-      <section className="resource-modal azure-login-modal" role="dialog" aria-modal="true" aria-labelledby="azure-managed-title" ref={dialog}>
+      <section className="resource-modal azure-managed-modal" role="dialog" aria-modal="true" aria-labelledby="azure-managed-title" ref={dialog}>
         <header className="resource-modal-header">
           <h2 id="azure-managed-title">Azure 자동 연동</h2>
           <button className="resource-modal-close" type="button" onClick={onClose} aria-label="닫기">×</button>
         </header>
-        <form className="resource-modal-body azure-login-body" onSubmit={handleSubmit}>
+        <form className="resource-modal-body azure-managed-body" onSubmit={handleSubmit}>
           <strong>{account.display_name || account.external_account_id}</strong>
           <p>각 리소스 그룹의 사용자 할당 관리 ID에 Broker GCP 서비스 계정을 신뢰하도록 설정하고, Reader 권한을 부여한 뒤 입력하세요.</p>
           <label>
