@@ -34,7 +34,7 @@ Bootstrap `remove`는 Runtime이 사용할 수 있는 k3s를 제거하지 않는
 gVisor와 `RuntimeClass/gvisor`도 남긴다. PWN Pod 사용 중에는 Runtime이 이 구성을
 참조할 수 있기 때문이다.
 
-Bootstrap `0.4.3`은 공식 gVisor `20261005.0` APT 저장소에서 `runsc`와 shim을
+Bootstrap `0.4.5`는 공식 gVisor `20261005.0` APT 저장소에서 `runsc`와 shim을
 설치한다. 패키지 파일은 AMD64에서 약 171 MB, ARM64에서 약 158 MB이며
 설치와 시험 Pod 실행에는 APT 저장소와 Docker Hub로 나가는 연결이 필요하다.
 기존에 다른 gVisor 릴리스가 있거나 `runsc` handler가 충돌하면 자동으로
@@ -274,7 +274,7 @@ sudo bash deploy/bootstrap/node-agent-bootstrap.sh remove
 Provider 관리면에 전달할 버전 고정 bundle과 checksum을 만든다.
 
 ```bash
-bash deploy/bootstrap/build-bundle.sh 0.4.3
+bash deploy/bootstrap/build-bundle.sh 0.4.5
 ```
 
 생성되는 `dist/*.tar.gz`와 `.sha256`은 artifact 저장소에 올린다. AWS SSM, GCP

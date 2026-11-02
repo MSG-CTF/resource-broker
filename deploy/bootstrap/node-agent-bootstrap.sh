@@ -1029,6 +1029,7 @@ render_daemonset() {
     -f "${image_file}" \
     --containers=node-agent \
     AGENT_DRY_RUN=false \
+    RESOURCE_TARGET_ID="${RESOURCE_TARGET_ID}" \
     BROKER_OBSERVATIONS_URL="${OBSERVATIONS_URL}" \
     -o yaml > "${output_file}"
   rm -f -- "${image_file}"
@@ -1109,8 +1110,14 @@ reconcile() {
     certificate_changed=true
   fi
 
-  local node_name
+  local node_name node_name_file
   node_name="$(single_node_name)"
+  node_name_file=/etc/rancher/k3s/config.yaml.d/99-msg-broker-node-name.yaml
+  if [[ -f "${node_name_file}" && "$(cat "${node_name_file}")" != "node-name: ${node_name}" ]]; then
+    fail "The pinned k3s node name differs from the active node."
+  fi
+  install -d -m 0755 "${node_name_file%/*}"
+  printf 'node-name: %s\n' "${node_name}" > "${node_name_file}"
   k3s kubectl annotate node "${node_name}" \
     "msg-broker.io/resource-target-id=${RESOURCE_TARGET_ID}" \
     --overwrite
