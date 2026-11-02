@@ -1,9 +1,6 @@
 from collections.abc import Callable, Iterable
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
-from urllib.parse import urlsplit
-
-import requests
 
 from app.adapters.base import ProviderInstanceSummary
 from app.domain.enums import Architecture
@@ -87,11 +84,6 @@ class AzureDependencyError(AzureAdapterError):
 class AzureAuthenticationError(AzureAdapterError):
     error_code = "AZURE_AUTHENTICATION_FAILED"
     public_message = "Azure authentication failed."
-
-
-class AzureUserLoginRequiredError(AzureAuthenticationError):
-    error_code = "AZURE_USER_LOGIN_REQUIRED"
-    public_message = "Microsoft 계정 연결을 완료한 뒤 다시 조회하세요."
 
 
 class AzurePermissionError(AzureAdapterError):
@@ -368,7 +360,7 @@ def _translate_azure_error(
     ):
         return AzureApiUnavailableError(subscription_id)
 
-    if isinstance(error, (azure_exceptions.HttpResponseError, requests.HTTPError)):
+    if isinstance(error, azure_exceptions.HttpResponseError):
         status_code = _azure_http_status(error)
         if status_code == 401:
             return AzureAuthenticationError(subscription_id)
@@ -385,8 +377,6 @@ def _translate_azure_error(
 
     if isinstance(error, azure_exceptions.AzureError):
         return AzureAdapterError(subscription_id)
-    if isinstance(error, requests.RequestException):
-        return AzureApiUnavailableError(subscription_id)
     return AzureAdapterError(subscription_id)
 
 
@@ -396,7 +386,6 @@ class AzureAdapter:
         subscription_id: str,
         compute_client: AzureComputeClient,
         network_client: AzureNetworkClient,
-        user_credential: Any = None,
         resource_groups: tuple[str, ...] | None = None,
     ) -> None:
         self._subscription_id = _require_non_empty_string(
@@ -405,7 +394,6 @@ class AzureAdapter:
         )
         self._compute_client = compute_client
         self._network_client = network_client
-        self._user_credential = user_credential
         self._resource_groups = resource_groups
         self._sku_cache: dict[
             tuple[str, str],
@@ -459,59 +447,8 @@ class AzureAdapter:
                 error,
             ) from error
 
-    @classmethod
-    def from_user_credential(cls, subscription_id: str, credential: Any) -> "AzureAdapter":
-        try:
-            from azure.mgmt.compute import ComputeManagementClient
-            from azure.mgmt.network import NetworkManagementClient
-        except ModuleNotFoundError as error:
-            raise AzureDependencyError(subscription_id) from error
-        return cls(
-            subscription_id,
-            ComputeManagementClient(credential, subscription_id),
-            NetworkManagementClient(credential, subscription_id),
-            user_credential=credential,
-        )
-
-    def _user_resource_groups(self) -> Iterable[str]:
-        # Resource-group roles do not grant subscription-wide VM/SKU reads.
-        prefix = f"https://management.azure.com/subscriptions/{self._subscription_id}/resourcegroups"
-        url = f"{prefix}?api-version=2021-04-01"
-        visited: set[str] = set()
-        while url:
-            parsed = urlsplit(url)
-            if (parsed.scheme != "https" or parsed.netloc != "management.azure.com"
-                    or parsed.path.lower() != urlsplit(prefix).path.lower() or url in visited):
-                raise AzureApiUnavailableError(self._subscription_id)
-            visited.add(url)
-            token = self._user_credential.get_token("https://management.azure.com/.default")
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {token.token}"},
-                timeout=30, allow_redirects=False,
-            )
-            response.raise_for_status()
-            if response.status_code != 200:
-                raise AzureApiUnavailableError(self._subscription_id)
-            payload = response.json()
-            for group in payload["value"]:
-                yield _require_non_empty_string("resource_group.name", group.get("name"))
-            url = payload.get("nextLink")
-
-    def check_user_access(self) -> None:
-        try:
-            next(iter(self._user_resource_groups()), None)
-        except AzureAdapterError:
-            raise
-        except Exception as error:
-            raise _translate_azure_error(self._subscription_id, error) from error
-
     def _resource_group_virtual_machines(self) -> Iterable[Any]:
-        groups = (
-            self._resource_groups
-            if self._resource_groups is not None
-            else self._user_resource_groups()
-        )
-        for name in groups:
+        for name in self._resource_groups or ():
             for vm in self._compute_client.virtual_machines.list(name):
                 yield self._compute_client.virtual_machines.get(
                     name, vm.name, expand="instanceView"
@@ -570,7 +507,7 @@ class AzureAdapter:
         try:
             self._load_skus_for_location(location)
         except Exception as error:
-            if (self._user_credential is None and self._resource_groups is None) or not isinstance(
+            if self._resource_groups is None or not isinstance(
                 _translate_azure_error(self._subscription_id, error), AzurePermissionError
             ):
                 raise
@@ -644,7 +581,7 @@ class AzureAdapter:
         summaries: list[ProviderInstanceSummary] = []
 
         try:
-            if self._user_credential is not None or self._resource_groups is not None:
+            if self._resource_groups is not None:
                 status_by_vm_key = {}
                 virtual_machines = self._resource_group_virtual_machines()
             else:
@@ -658,7 +595,7 @@ class AzureAdapter:
                 try:
                     internal_ip, external_ip = self._ip_addresses(vm)
                 except Exception as error:
-                    if (self._user_credential is None and self._resource_groups is None) or not isinstance(
+                    if self._resource_groups is None or not isinstance(
                         _translate_azure_error(self._subscription_id, error), AzurePermissionError
                     ):
                         raise

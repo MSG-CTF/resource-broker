@@ -189,6 +189,7 @@ class AzureResourceGroupScope(ApiSchema):
 
 
 class AzureAccountConfig(ApiSchema):
+    # Legacy login values remain readable so existing accounts can be converted.
     auth_method: Literal["GOOGLE_OIDC_CLIENT_ASSERTION", "USER_BROWSER", "USER_DEVICE_CODE"] = (
         "GOOGLE_OIDC_CLIENT_ASSERTION"
     )
@@ -223,6 +224,10 @@ class AzureAccountConfig(ApiSchema):
     def require_unique_subscriptions(cls, value: list[str]) -> list[str]:
         normalized = [subscription_id.lower() for subscription_id in value]
         return _require_unique_values("subscription_ids", normalized)
+
+
+class AzureFederatedAccountConfig(AzureAccountConfig):
+    auth_method: Literal["GOOGLE_OIDC_CLIENT_ASSERTION"] = "GOOGLE_OIDC_CLIENT_ASSERTION"
 
 
 class AzureManagedIdentityRequest(ApiSchema):
@@ -280,7 +285,7 @@ class AwsAccountCreateRequest(ProviderAccountCreateBase):
 class AzureAccountCreateRequest(ProviderAccountCreateBase):
     provider: Literal[Provider.AZURE]
     external_account_id: AzureUuid
-    config: AzureAccountConfig
+    config: AzureFederatedAccountConfig
 
     @field_validator("external_account_id")
     @classmethod
