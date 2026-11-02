@@ -54,8 +54,8 @@ k3s, Docker, 문제 이미지, DB, TLS, 플랫폼 인증/점수 연동, Broker �
 필수 입력은 서로 다른 프로젝트 ID 세 개다. 일부 그룹만 선택해도 입력 객체에는 세 ID를 유지한다.
 배포할 프로젝트는 미리 생성하고 결제를 연결해야 한다.
 Terraform은 프로젝트와 Billing account를 만들지 않는다. `heavy`와 `pixel_grand`에서는
-기존 중앙 Broker 서비스 계정에 조회 전용 `roles/compute.viewer`를 부여한다.
-VM 시작·중지 권한은 이 구성에 포함되지 않는다.
+기존 중앙 Broker 서비스 계정에 조회용 `roles/compute.viewer`와 시작·중지만 허용하는
+프로젝트 커스텀 역할을 부여한다.
 
 실행 계정에는 활성화한 프로젝트의 API 활성화, VPC/subnet/firewall, IP, VM/disk 생성 권한이 필요하다.
 Broker IAM grant를 적용하려면 `heavy`와 `pixel_grand` 프로젝트의 IAM 정책 조회·변경 권한도 필요하다.
@@ -266,9 +266,9 @@ Node Agent 설치와 실제 경기의 12시간 부하 검증은 아직 수행하
 VM 생성에 사용한 로컬 ADC와 운영 Broker의 attached service account는 별도 인증 주체다.
 `central_service_account_email`에는 운영 Broker가 실제 사용하는 서비스 계정을 입력한다.
 `iam.tf`는 정유찬 KOTH의 `heavy` 프로젝트와 허준하 KOTH의 `pixel_grand` 프로젝트에만
-해당 계정의 `roles/compute.viewer`를 추가한다. 기존 IAM 구성원은 유지한다.
-이 역할은 Broker의 verify/sync에 필요한 Compute 조회 권한을 포함한다.
-VM 시작·중지에는 별도 제어 권한이 필요하다.
+해당 계정의 `roles/compute.viewer`와 `compute.instances.start`, `compute.instances.stop`
+두 권한만 담은 커스텀 역할을 추가한다. 기존 IAM 구성원은 유지한다.
+조회 역할은 Broker의 verify/sync에 필요한 Compute 조회 권한을 포함한다.
 `shared` 프로젝트와 Bootstrap 원격 설치 권한은 이 IAM 리소스의 범위가 아니다.
 적용 후 Broker 대시보드에서 각 계정을 다시 verify하고 sync한다.
 
