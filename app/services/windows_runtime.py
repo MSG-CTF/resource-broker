@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import ipaddress
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
@@ -53,6 +53,9 @@ class WindowsRuntimeService:
             raise WindowsRuntimeError("WINDOWS_CONNECTION_NOT_CONFIGURED", "Verified Windows RDP connection information has not been configured.")
         return connection
 
+    def configured_connections(self):
+        return self.repository.connections()
+
     def _host(self, target: ResourceTargetTable, connection: WindowsVmConnectionTable):
         raw_host = target.public_ip if connection.address_source == "public_ip" else target.private_ip
         try:
@@ -94,6 +97,10 @@ class WindowsRuntimeService:
         if reset_execution_id is not None:
             if connection.state != "RESET_REQUIRED" or connection.current_execution_id != reset_execution_id:
                 raise WindowsRuntimeError("WINDOWS_RESET_CONFLICT", "The reset confirmation must match the execution awaiting reset.")
+            execution = self.repository.execution(reset_execution_id)
+            if execution is None or execution.finished_at is None:
+                raise WindowsRuntimeError("WINDOWS_RESET_CONFLICT", "The execution has not finished.")
+            execution.recovery_event_id = execution.recovery_event_id or uuid4()
             connection.state = "READY"
             connection.current_execution_id = None
         connection.username = username

@@ -16,6 +16,8 @@ from app.schemas.windows_runtime import (
     WindowsVmConnectionUpdate,
     WindowsVmExecutionEvent,
     WindowsVmExecutionResponse,
+    WindowsVmStatusListResponse,
+    WindowsVmStatusResponse,
 )
 from app.services.windows_runtime import WindowsRuntimeError, WindowsRuntimeService
 
@@ -73,6 +75,7 @@ def _connection_response(target, connection, host):
         port=connection.port,
         username=connection.username,
         rdp_file=rdp_file,
+        executor_certificate_pem=connection.executor_certificate_pem,
     )
 
 
@@ -113,6 +116,18 @@ def record_windows_vm_execution(resource_target_id: UUID, request: WindowsVmExec
         return _error(session, error)
     execution = outcome.execution
     return WindowsVmExecutionResponse(resource_target_id=resource_target_id, execution_id=execution.execution_id, execution_state="FINISHED" if execution.finished_at else "RUNNING", vm_state=outcome.connection.state, started_at=execution.started_at, finished_at=execution.finished_at, result=execution.result, exit_code=execution.exit_code, replayed=outcome.replayed)
+
+
+@admin_router.get("", response_model=WindowsVmStatusListResponse, responses=errors)
+def list_admin_windows_vm_statuses(response: Response, session: Session = Depends(get_db_session)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        connections = WindowsRuntimeService(session).configured_connections()
+    except SQLAlchemyError as error:
+        return _error(session, error)
+    return WindowsVmStatusListResponse(
+        items=[WindowsVmStatusResponse(resource_target_id=item.resource_target_id, enabled=item.enabled, state=item.state) for item in connections]
+    )
 
 
 @admin_router.get("/{resource_target_id}/connection", response_model=WindowsVmConnectionAdminResponse, responses=errors)

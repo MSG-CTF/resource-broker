@@ -14,7 +14,6 @@ from app.api.admin_agent_enrollments import router as admin_agent_enrollments_ro
 from app.api.admin_bootstrap_jobs import router as admin_bootstrap_jobs_router
 from app.api.admin_provider_accounts import router as admin_provider_accounts_router
 from app.api.admin_resource_targets import router as admin_resource_targets_router
-from app.api.admin_windows_workers import router as admin_windows_workers_router
 from app.api.agent_enrollments import router as agent_enrollments_router
 from app.api.agent_bootstrap import router as agent_bootstrap_router
 from app.api.agent_bootstrap_enrollments import router as agent_bootstrap_enrollments_router
@@ -37,13 +36,12 @@ from app.api.scheduler_auth import (
     SchedulerAuthHttpError,
     scheduler_auth_http_error_handler,
 )
-from app.api.windows_worker_leases import router as windows_worker_leases_router
 from app.api.windows_runtime import (
     router as windows_runtime_router,
     admin_router as admin_windows_runtime_router,
 )
 from app.services.bootstrap_worker import run_bootstrap_worker
-from app.services.windows_worker import run_windows_worker
+from app.services.windows_reset_worker import run_windows_reset_worker
 
 
 @asynccontextmanager
@@ -51,7 +49,7 @@ async def lifespan(_: FastAPI):
     stop_event = asyncio.Event()
     workers = (
         asyncio.create_task(run_bootstrap_worker(stop_event)),
-        asyncio.create_task(run_windows_worker(stop_event)),
+        asyncio.create_task(run_windows_reset_worker(stop_event)),
     )
     try:
         yield
@@ -91,7 +89,6 @@ def create_app() -> FastAPI:
     app.include_router(admin_bootstrap_jobs_router)
     app.include_router(admin_provider_accounts_router)
     app.include_router(admin_resource_targets_router)
-    app.include_router(admin_windows_workers_router)
     app.include_router(agent_enrollments_router)
     app.include_router(agent_bootstrap_router)
     app.include_router(agent_bootstrap_enrollments_router)
@@ -101,7 +98,6 @@ def create_app() -> FastAPI:
     app.include_router(inventory_router)
     app.include_router(reservations_router)
     app.include_router(runtime_k3s_credentials_router)
-    app.include_router(windows_worker_leases_router)
     app.include_router(windows_runtime_router)
     app.include_router(admin_windows_runtime_router)
     app.include_router(health_router)

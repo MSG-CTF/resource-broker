@@ -32,6 +32,7 @@ class WindowsVmConnectionResponse(ApiSchema):
     port: int
     username: str
     rdp_file: str
+    executor_certificate_pem: str | None = None
 
 
 class WindowsVmAvailableListResponse(ApiSchema):
@@ -48,6 +49,16 @@ class WindowsVmConnectionAdminResponse(ApiSchema):
     state: Literal["READY", "RUNNING", "RESET_REQUIRED"]
     current_execution_id: UUID | None
     updated_at: datetime
+
+
+class WindowsVmStatusResponse(ApiSchema):
+    resource_target_id: UUID
+    enabled: bool
+    state: Literal["READY", "RUNNING", "RESET_REQUIRED"]
+
+
+class WindowsVmStatusListResponse(ApiSchema):
+    items: list[WindowsVmStatusResponse]
 
 
 class WindowsVmExecutionEvent(ApiSchema):

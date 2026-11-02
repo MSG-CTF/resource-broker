@@ -1,6 +1,8 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from datetime import datetime
+
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.tables import ProviderAccountTable, ResourceTargetTable
@@ -24,11 +26,54 @@ class WindowsRuntimeRepository:
     def connection(self, resource_target_id: UUID):
         return self.session.get(WindowsVmConnectionTable, resource_target_id)
 
+    def connections(self):
+        return self.session.scalars(
+            select(WindowsVmConnectionTable).order_by(WindowsVmConnectionTable.resource_target_id)
+        ).all()
+
     def execution(self, execution_id: UUID):
         return self.session.get(WindowsVmExecutionTable, execution_id)
 
     def add(self, row):
         self.session.add(row)
+
+    def pending_reset(self, target_ids: tuple[UUID, ...], *, finished_before: datetime):
+        if not target_ids:
+            return None
+        connection = WindowsVmConnectionTable
+        execution = WindowsVmExecutionTable
+        target = ResourceTargetTable
+        account = ProviderAccountTable
+        return self.session.execute(
+            select(target, account, connection, execution)
+            .join(connection, connection.resource_target_id == target.resource_target_id)
+            .join(account, account.account_id == target.account_id)
+            .join(execution, execution.execution_id == connection.current_execution_id)
+            .where(
+                target.resource_target_id.in_(target_ids),
+                account.provider == Provider.AZURE,
+                target.os_type == "WINDOWS",
+                connection.state == "RESET_REQUIRED",
+                execution.finished_at <= finished_before,
+            )
+            .order_by(connection.updated_at, target.resource_target_id)
+            .limit(1)
+            .with_for_update(of=target, skip_locked=True)
+        ).first()
+
+    def pending_recovery(self, now: datetime):
+        execution = WindowsVmExecutionTable
+        return self.session.scalar(
+            select(execution)
+            .where(
+                execution.recovery_event_id.is_not(None),
+                execution.recovery_delivered_at.is_(None),
+                or_(execution.recovery_retry_at.is_(None), execution.recovery_retry_at <= now),
+            )
+            .order_by(execution.finished_at, execution.execution_id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
 
     def available(self, *, after: UUID | None, limit: int):
         connection = WindowsVmConnectionTable

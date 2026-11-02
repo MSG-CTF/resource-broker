@@ -1,0 +1,371 @@
+diff --git a/cmd/windows-executor-client/main.go b/cmd/windows-executor-client/main.go
+index 7823e6f..b755604 100644
+--- a/cmd/windows-executor-client/main.go
++++ b/cmd/windows-executor-client/main.go
+@@ -8,6 +8,7 @@ import (
+ 	"crypto/x509"
+ 	"encoding/hex"
+ 	"encoding/json"
++	"encoding/pem"
+ 	"errors"
+ 	"flag"
+ 	"fmt"
+@@ -26,7 +27,9 @@ func main() {
+ 	vmURL := flag.String("vm", "", "Azure VM HTTPS URL, for example https://203.0.113.10")
+ 	brokerURL := flag.String("broker", "https://broker.mjsec.kr/api", "Broker HTTPS API base URL")
+ 	target := flag.String("target", "", "Broker resource target UUID for the Azure Windows VM")
+-	certPath := flag.String("cert", "", "VM server certificate PEM file")
++	certPath := flag.String("cert", "", "optional VM server certificate PEM file (otherwise fetch from Broker)")
++	clientCertPath := flag.String("client-cert", "", "Runtime client certificate PEM file")
++	clientKeyPath := flag.String("client-key", "", "Runtime client private key PEM file")
+ 	tokenPath := flag.String("token-file", "", "existing Runtime API token file")
+ 	binaryPath := flag.String("exe", "", "compiled Windows EXE")
+ 	timeout := flag.Int("timeout", 30, "execution timeout in seconds (1-300)")
+@@ -34,7 +37,7 @@ func main() {
+ 	if flag.NArg() != 0 {
+ 		fail(errors.New("unexpected arguments"))
+ 	}
+-	if err := run(*vmURL, *brokerURL, *target, *certPath, *tokenPath, *binaryPath, *timeout); err != nil {
++	if err := run(*vmURL, *brokerURL, *target, *certPath, *clientCertPath, *clientKeyPath, *tokenPath, *binaryPath, *timeout); err != nil {
+ 		fail(err)
+ 	}
+ }
+@@ -44,7 +47,7 @@ func fail(err error) {
+ 	os.Exit(1)
+ }
+ 
+-func run(rawURL, brokerURL, target, certPath, tokenPath, binaryPath string, timeout int) (runErr error) {
++func run(rawURL, brokerURL, target, certPath, clientCertPath, clientKeyPath, tokenPath, binaryPath string, timeout int) (runErr error) {
+ 	u, err := url.Parse(rawURL)
+ 	if err != nil || u.Scheme != "https" || net.ParseIP(u.Hostname()) == nil || (u.Port() != "" && u.Port() != "443") || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+ 		return errors.New("VM URL must be https://<public-ip>[:443]")
+@@ -60,13 +63,9 @@ func run(rawURL, brokerURL, target, certPath, tokenPath, binaryPath string, time
+ 	if timeout < 1 || timeout > 300 {
+ 		return errors.New("timeout must be 1-300 seconds")
+ 	}
+-	certificate, err := os.ReadFile(certPath)
++	clientCertificate, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
+ 	if err != nil {
+-		return err
+-	}
+-	roots := x509.NewCertPool()
+-	if !roots.AppendCertsFromPEM(certificate) {
+-		return errors.New("VM certificate file contains no certificate")
++		return fmt.Errorf("Runtime client certificate: %w", err)
+ 	}
+ 	tokenBytes, err := os.ReadFile(tokenPath)
+ 	if err != nil {
+@@ -76,6 +75,48 @@ func run(rawURL, brokerURL, target, certPath, tokenPath, binaryPath string, time
+ 	if len(token) < 32 || strings.ContainsAny(token, "\r\n\t ") {
+ 		return errors.New("invalid Runtime API token")
+ 	}
++	var certificate []byte
++	if certPath != "" {
++		certificate, err = os.ReadFile(certPath)
++		if err != nil {
++			return err
++		}
++	} else {
++		connectionURL := strings.TrimRight(brokerURL, "/") + "/v1/runtime/windows-vms/" + targetID.String() + "/connection"
++		request, err := http.NewRequest(http.MethodGet, connectionURL, nil)
++		if err != nil {
++			return err
++		}
++		request.Header.Set("Authorization", "Bearer "+token)
++		response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
++		if err != nil {
++			return err
++		}
++		if response.StatusCode != http.StatusOK {
++			return expectStatus(response, http.StatusOK)
++		}
++		var connection struct {
++			Host string `json:"host"`
++			ExecutorCertificatePEM string `json:"executor_certificate_pem"`
++		}
++		decodeErr := json.NewDecoder(io.LimitReader(response.Body, 8192)).Decode(&connection)
++		response.Body.Close()
++		if decodeErr != nil || connection.Host != u.Hostname() || connection.ExecutorCertificatePEM == "" {
++			return errors.New("Broker returned no matching VM certificate")
++		}
++		certificate = []byte(connection.ExecutorCertificatePEM)
++	}
++	block, rest := pem.Decode(certificate)
++	if block == nil || block.Type != "CERTIFICATE" || len(bytes.TrimSpace(rest)) != 0 {
++		return errors.New("VM certificate must contain exactly one certificate")
++	}
++	expectedCertificate, err := x509.ParseCertificate(block.Bytes)
++	if err != nil {
++		return fmt.Errorf("VM certificate: %w", err)
++	}
++	if err := expectedCertificate.VerifyHostname(u.Hostname()); err != nil {
++		return fmt.Errorf("VM certificate IP: %w", err)
++	}
+ 	file, err := os.Open(binaryPath)
+ 	if err != nil {
+ 		return err
+@@ -93,7 +134,32 @@ func run(rawURL, brokerURL, target, certPath, tokenPath, binaryPath string, time
+ 		return err
+ 	}
+ 	client := &http.Client{
+-		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}},
++		Transport: &http.Transport{TLSClientConfig: &tls.Config{
++			Certificates: []tls.Certificate{clientCertificate}, MinVersion: tls.VersionTLS12,
++			// The Broker supplies this VM's exact self-signed leaf, not a CA certificate.
++			InsecureSkipVerify: true,
++			VerifyConnection: func(state tls.ConnectionState) error {
++				if len(state.PeerCertificates) != 1 || !bytes.Equal(state.PeerCertificates[0].Raw, expectedCertificate.Raw) {
++					return errors.New("VM presented a different certificate")
++				}
++				leaf := state.PeerCertificates[0]
++				now := time.Now()
++				if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
++					return errors.New("VM certificate is outside its validity period")
++				}
++				if err := leaf.VerifyHostname(u.Hostname()); err != nil {
++					return err
++				}
++				serverAuth := false
++				for _, usage := range leaf.ExtKeyUsage {
++					serverAuth = serverAuth || usage == x509.ExtKeyUsageServerAuth
++				}
++				if !serverAuth {
++					return errors.New("VM certificate is not for TLS server authentication")
++				}
++				return leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature)
++			},
++		}},
+ 		Timeout:   3 * time.Minute,
+ 	}
+ 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout+180)*time.Second)
+@@ -122,7 +188,6 @@ func run(rawURL, brokerURL, target, certPath, tokenPath, binaryPath string, time
+ 		return err
+ 	}
+ 	request.ContentLength = info.Size()
+-	request.Header.Set("Authorization", "Bearer "+token)
+ 	request.Header.Set("Content-Type", "application/octet-stream")
+ 	request.Header.Set("X-Content-SHA256", hex.EncodeToString(hash.Sum(nil)))
+ 	request.Header.Set("X-Timeout-Seconds", fmt.Sprint(timeout))
+@@ -143,7 +208,6 @@ func run(rawURL, brokerURL, target, certPath, tokenPath, binaryPath string, time
+ 		if err != nil {
+ 			return err
+ 		}
+-		request.Header.Set("Authorization", "Bearer "+token)
+ 		response, err = client.Do(request)
+ 		if err != nil {
+ 			return err
+@@ -188,7 +252,6 @@ func run(rawURL, brokerURL, target, certPath, tokenPath, binaryPath string, time
+ 		if err != nil {
+ 			return err
+ 		}
+-		request.Header.Set("Authorization", "Bearer "+token)
+ 		response, err = client.Do(request)
+ 		if err != nil {
+ 			return err
+diff --git a/cmd/windows-executor/main_windows.go b/cmd/windows-executor/main_windows.go
+index 683e2d2..24b0e83 100644
+--- a/cmd/windows-executor/main_windows.go
++++ b/cmd/windows-executor/main_windows.go
+@@ -83,7 +83,7 @@ func main() {
+ 	serve := flag.Bool("serve", false, "serve the executor API")
+ 	initServer := flag.Bool("init-server", false, "create the server certificate")
+ 	serverIP := flag.String("server-ip", "", "public IP address in the server certificate")
+-	tokenFile := flag.String("token-file", "", "Runtime API token file")
++	clientCA := flag.String("client-ca", "", "trusted Runtime client CA certificate")
+ 	tlsCert := flag.String("tls-cert", "", "server certificate PEM file")
+ 	tlsKey := flag.String("tls-key", "", "server private key PEM file")
+ 	flag.Parse()
+@@ -101,7 +101,7 @@ func main() {
+ 		return
+ 	}
+ 	if *serve {
+-		if err := serveAPI(*root, *tokenFile, *tlsCert, *tlsKey); err != nil {
++		if err := serveAPI(*root, *clientCA, *tlsCert, *tlsKey); err != nil {
+ 			fail(err)
+ 		}
+ 		return
+diff --git a/cmd/windows-executor/server_windows.go b/cmd/windows-executor/server_windows.go
+index c00f2ee..0185a00 100644
+--- a/cmd/windows-executor/server_windows.go
++++ b/cmd/windows-executor/server_windows.go
+@@ -5,7 +5,6 @@ import (
+ 	"crypto/elliptic"
+ 	"crypto/rand"
+ 	"crypto/sha256"
+-	"crypto/subtle"
+ 	"crypto/tls"
+ 	"crypto/x509"
+ 	"crypto/x509/pkix"
+@@ -41,12 +40,13 @@ func createServerCertificate(certPath, keyPath, address string) error {
+ 			return err
+ 		}
+ 		cert, err := x509.ParseCertificate(pair.Certificate[0])
+-		if err != nil || cert.VerifyHostname(address) != nil {
+-			return errors.New("installed certificate does not match the VM IP address")
++		if err != nil {
++			return err
+ 		}
+-		return nil
+-	}
+-	if !errors.Is(certErr, os.ErrNotExist) || !errors.Is(keyErr, os.ErrNotExist) {
++		if cert.VerifyHostname(address) == nil {
++			return nil
++		}
++	} else if !errors.Is(certErr, os.ErrNotExist) || !errors.Is(keyErr, os.ErrNotExist) {
+ 		return errors.New("incomplete server certificate; refusing to replace its identity")
+ 	}
+ 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+@@ -84,59 +84,40 @@ func createServerCertificate(certPath, keyPath, address string) error {
+ 	return nil
+ }
+ 
+-func serveAPI(root, tokenPath, certPath, keyPath string) error {
+-	if root == "" || tokenPath == "" || certPath == "" || keyPath == "" {
+-		return errors.New("executor API requires root, token and TLS files")
++func serveAPI(root, clientCAPath, certPath, keyPath string) error {
++	if root == "" || clientCAPath == "" || certPath == "" || keyPath == "" {
++		return errors.New("executor API requires root, client CA and TLS files")
+ 	}
+-	rawToken, err := os.ReadFile(tokenPath)
++	rawCA, err := os.ReadFile(clientCAPath)
+ 	if err != nil {
+ 		return err
+ 	}
+-	token := strings.TrimSpace(string(rawToken))
+-	if len(token) < 32 || strings.ContainsAny(token, "\r\n\t ") {
+-		return errors.New("invalid Runtime API token")
++	clientCAs := x509.NewCertPool()
++	if !clientCAs.AppendCertsFromPEM(rawCA) {
++		return errors.New("invalid Runtime client CA certificate")
+ 	}
+ 	root, err = filepath.Abs(root)
+ 	if err != nil {
+ 		return err
+ 	}
+-	api := &executorAPI{root: root, tokenHash: sha256.Sum256([]byte(token))}
++	api := &executorAPI{root: root}
+ 	mux := http.NewServeMux()
+ 	mux.HandleFunc("PUT /v1/executions/{id}", api.submit)
+ 	mux.HandleFunc("GET /v1/executions/{id}", api.get)
+ 	mux.HandleFunc("DELETE /v1/executions/{id}", api.remove)
+ 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+ 	server := &http.Server{
+-		Addr: ":443", Handler: api.authorize(mux),
++		Addr: ":443", Handler: mux,
+ 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 2 * time.Minute,
+ 		WriteTimeout: 3 * time.Minute, IdleTimeout: 30 * time.Second,
+-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
++		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: clientCAs},
+ 	}
+ 	return server.ListenAndServeTLS(certPath, keyPath)
+ }
+ 
+ type executorAPI struct {
+-	root      string
+-	tokenHash [32]byte
+-	mu        sync.Mutex
+-}
+-
+-func (api *executorAPI) authorize(next http.Handler) http.Handler {
+-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+-		values := r.Header.Values("Authorization")
+-		if len(values) != 1 || !strings.HasPrefix(values[0], "Bearer ") {
+-			w.Header().Set("WWW-Authenticate", `Bearer realm="windows-executor"`)
+-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+-			return
+-		}
+-		supplied := sha256.Sum256([]byte(strings.TrimPrefix(values[0], "Bearer ")))
+-		if subtle.ConstantTimeCompare(supplied[:], api.tokenHash[:]) != 1 {
+-			w.Header().Set("WWW-Authenticate", `Bearer realm="windows-executor"`)
+-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+-			return
+-		}
+-		next.ServeHTTP(w, r)
+-	})
++	root string
++	mu   sync.Mutex
+ }
+ 
+ func (api *executorAPI) paths(w http.ResponseWriter, r *http.Request) (string, string, string, bool) {
+diff --git a/docs/windows-executor.md b/docs/windows-executor.md
+index e0be20d..fddbea0 100644
+--- a/docs/windows-executor.md
++++ b/docs/windows-executor.md
+@@ -1,14 +1,17 @@
+ # Azure Windows executor
+ 
+-Terraform installs `cmd/windows-executor` in each Azure Windows VM. Its HTTPS API
+-listens on the VM public IP, port 443. The same `RUNTIME_API_TOKEN` used between
+-Runtime and Broker is accepted as `Authorization: Bearer <token>`. The token is
+-installed after Terraform with an Azure Managed Run Command protected parameter;
+-it is not placed in Terraform state. The API certificate is self-signed for the
+-VM public IP. Runtime must trust the certificate retrieved through Azure's
+-control plane and must verify the IP address; do not disable TLS verification.
+-
+-Build the artifact from this repository and publish it at a versioned HTTPS URL:
++The Windows VM image contains `cmd/windows-executor` and a scheduled task that
++runs submitted binaries as the unprivileged `ctfuser`. The VM API listens on
++HTTPS port 443 and requires a Runtime client certificate. Only the public
++Runtime trust certificate is in the image; the Runtime private key and Broker
++`RUNTIME_API_TOKEN` stay outside the guest. After each OS disk restore, Broker
++gets the VM public IP from Azure, creates a fresh VM server certificate through
++Azure Run Command, and publishes that public certificate in the authenticated
++Windows VM connection response. Runtime must verify both the certificate and
++the IP address. Do not disable TLS verification.
++
++Build the artifact from this repository and deliver it to the VM through a
++private management channel:
+ 
+ ```powershell
+ $env:GOOS = 'windows'
+@@ -21,14 +24,13 @@ The VM accepts one execution at a time. `PUT /v1/executions/{uuid}` uploads a ra
+ EXE of 1 to 64 MiB with these headers:
+ 
+ ```text
+-Authorization: Bearer <RUNTIME_API_TOKEN>
+ Content-Type: application/octet-stream
+ X-Content-SHA256: <64 lowercase hexadecimal characters>
+ X-Timeout-Seconds: <1..300>
+ ```
+ 
+ It returns `202` after starting the `MSGWindowsExecutor` scheduled task. The
+-task runs as non-administrator `msgworker`, checks the SHA-256, and starts only
++task runs as non-administrator `ctfuser`, checks the SHA-256, and starts only
+ `jobs/<uuid>/submission.exe` with no arguments or shell. `GET` on the same URL
+ returns `202` while pending or `200` with `execution_id`, `status`, `exit_code`,
+ base64 `stdout`/`stderr`, `output_truncated`, and `duration_ms`. Output is capped
+@@ -38,24 +40,24 @@ gets `409` until the result is deleted.
+ 
+ Runtime can call the VM API with the client command. Use the Runtime's existing
+ Broker token file, the Broker resource target UUID for the VM, its public IP,
+-and the certificate fetched from that VM:
++and the Runtime client certificate and private key:
+ 
+ ```powershell
+-go run ./cmd/windows-executor-client -vm https://<VM_PUBLIC_IP> -broker https://broker.mjsec.kr/api -target <RESOURCE_TARGET_UUID> -cert <VM_SERVER_CERT_PEM> -token-file <RUNTIME_BROKER_TOKEN_FILE> -exe <COMPILED_WINDOWS_EXE> -timeout 30
++go run ./cmd/windows-executor-client -vm https://<VM_PUBLIC_IP> -broker https://broker.mjsec.kr/api -target <RESOURCE_TARGET_UUID> -client-cert <RUNTIME_CLIENT_CERT_PEM> -client-key <RUNTIME_CLIENT_KEY_PEM> -token-file <RUNTIME_BROKER_TOKEN_FILE> -exe <COMPILED_WINDOWS_EXE> -timeout 30
+ ```
+ 
+-The client first reports `started` to Broker. If Broker rejects the VM, it does
+-not upload the EXE. It verifies the VM TLS certificate, uploads the EXE, polls
++The client first fetches the current VM server certificate from Broker and
++checks that Broker's IP matches `-vm`. It then reports `started` to Broker. If
++Broker rejects the VM, it does not upload the EXE. It verifies the VM TLS
++certificate, uploads the EXE, polls
+ the result, reports `finished` to Broker, checks that Broker returned
+ `RESET_REQUIRED`, prints the result JSON, and deletes the finished VM job.
+ If the VM call fails after `started`, it reports `finished` with `unreachable`
+-so Broker still requires a clean reset. Broker state alone does not reset the
+-VM; only confirm a reset with the completed execution ID after restoring a
+-clean image. This command is the Runtime-to-VM integration entry point until
++so Broker still requires a clean reset. Broker restores the OS disk before
++marking the VM ready again. This command is the Runtime-to-VM integration entry point until
+ the Backend upload API contract is available.
+ 
+-This is an execution prototype. `msgworker` is not a strong sandbox: submitted
++This is an execution prototype. `ctfuser` is not a strong sandbox: submitted
+ code can access the VM network and may leave child processes after a timeout.
+ Do not reuse a VM for another participant until it has been restored from a
+-clean image. Backend upload, job ownership, and image restoration are not yet
+-implemented.
++clean image. Backend upload and job ownership are not yet implemented.

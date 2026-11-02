@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, func, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID as PostgreSqlUuid
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,7 @@ class WindowsVmConnectionTable(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="READY", server_default="READY")
     current_execution_id: Mapped[UUID | None] = mapped_column(PostgreSqlUuid(as_uuid=True))
+    executor_certificate_pem: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
@@ -43,3 +44,6 @@ class WindowsVmExecutionTable(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result: Mapped[str | None] = mapped_column(String(16))
     exit_code: Mapped[int | None] = mapped_column(BigInteger)
+    recovery_event_id: Mapped[UUID | None] = mapped_column(PostgreSqlUuid(as_uuid=True))
+    recovery_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recovery_delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
