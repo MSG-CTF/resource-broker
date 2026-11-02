@@ -26,6 +26,16 @@ class AdminResourceTargetUpdateRequest(ApiSchema):
     enabled: bool = Field(strict=True)
 
 
+class VmPowerRequest(ApiSchema):
+    action: Literal["START", "STOP"]
+
+
+class VmPowerResponse(ApiSchema):
+    status: Literal["RUNNING", "DONE"]
+    vm_status: str
+    operation_name: str | None = None
+
+
 class ResourceRuntimeResponse(ApiSchema):
     type: RuntimeType | None
     target_id: str | None
@@ -57,6 +67,7 @@ class AdminResourceTargetResponse(ApiSchema):
     runtime: ResourceRuntimeResponse
     account_enabled: bool
     enabled: bool
+    manual_candidate_registration: bool = False
     observed_at: datetime
     last_seen_at: datetime
     retired_at: datetime | None

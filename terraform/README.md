@@ -1,7 +1,7 @@
 # GCP 다중 Project IAM 및 문제 VM 생성
 
 이 Terraform은 기존 중앙 MSG Broker Service Account를 여러 GCP Project의 IAM에
-한 번에 등록하고 API와 VM Manager를 준비하며 Project마다 문제 VM 네 대를 만듭니다.
+한 번에 등록하고 API와 VM Manager를 준비하며 Project마다 문제 VM 두 대를 만듭니다.
 Cloud Billing Account의 IAM
 등록은 `manage_billing_iam = true`일 때만 수행하며 기본값은 `false`입니다.
 
@@ -18,25 +18,24 @@ Cloud Billing Account의 IAM
 |---|---|---|---|
 | `msg-problem-heavy-01` | `e2-standard-8`: 8 vCPU / 32 GiB | Ubuntu 24.04 LTS AMD64 | `pd-balanced` 100 GiB |
 | `msg-problem-light-01` | `e2-standard-4`: 4 vCPU / 16 GiB | Ubuntu 24.04 LTS AMD64 | `pd-balanced` 100 GiB |
-| `msg-problem-light-02` | `e2-standard-2`: 2 vCPU / 8 GiB | Ubuntu 24.04 LTS AMD64 | `pd-balanced` 50 GiB |
-| `msg-problem-light-03` | `e2-standard-2`: 2 vCPU / 8 GiB | Ubuntu 24.04 LTS AMD64 | `pd-balanced` 50 GiB |
 
-Project당 합계는 16 vCPU, RAM 64 GiB, 공인 IPv4 네 개, 부팅 디스크 300 GiB입니다.
-현재 두 Project면 VM 여덟 대입니다. 테스트 Project에서 조회한 전체 리전 CPU 한도는
-16 vCPU, 리전 SSD 계열 디스크 한도는 300 GiB여서 기존 두 VM의 디스크 100 GiB는
-유지하고 추가 두 VM의 디스크를 각각 50 GiB로 구성합니다. 다른 Project의 한도가
-동일하다고 가정하지 마세요. 기존 사용량과 CPU·IP·디스크 quota에 따라 생성이
+Project당 합계는 12 vCPU, RAM 48 GiB, 공인 IPv4 두 개, 부팅 디스크 200 GiB입니다.
+불필요한 이름 변경을 피하도록 두 VM의 이름과 Terraform 주소를 유지합니다. 따라서
+`light-01`이라는 이름도 그대로지만 사양은 `e2-standard-4`입니다.
+Project를 하나 추가할 때마다 VM 두 대가 늘어납니다. 2026-10-27에 조회한 다섯 Project는
+전체 리전 CPU 한도 12 vCPU, `us-central1` 리전 E2 CPU 한도 24 vCPU와 SSD 디스크 한도
+250 GiB였습니다. 다른 Project의 한도가 동일하다고 가정하지 마세요. 기존 사용량과 CPU·IP·디스크 quota에 따라 생성이
 실패할 수 있으며, VM·디스크·공인 IP는 생성 후 비용 또는 무료 크레딧을 소비합니다.
 
 문제 수는 VM 전체 사양이 아니라 시스템 사용량과 문제별 자원 요구량을 차감해
 계산합니다. 아래는 VM마다 시스템용 0.5 vCPU·RAM 2 GiB를 제외한다고 가정한
 계획용 예시이며, Terraform이나 K3s에 이 예약량을 설정한 것은 아닙니다.
 
-| 문제 인스턴스 하나의 요구량 | heavy-01 | light-01 | light-02 | light-03 | Project당 합계 |
-|---|---:|---:|---:|---:|---:|
-| 2 vCPU / RAM 4 GiB | 3 | 1 | 0 | 0 | 4 |
-| 1 vCPU / RAM 2 GiB | 7 | 3 | 1 | 1 | 12 |
-| 0.5 vCPU / RAM 0.5 GiB | 15 | 7 | 3 | 3 | 28 |
+| 문제 인스턴스 하나의 요구량 | heavy-01 | light-01 | Project당 합계 |
+|---|---:|---:|---:|
+| 2 vCPU / RAM 4 GiB | 3 | 1 | 4 |
+| 1 vCPU / RAM 2 GiB | 7 | 3 | 10 |
+| 0.5 vCPU / RAM 0.5 GiB | 15 | 7 | 22 |
 
 각 행은 해당 문제만 실행하는 경우이며 행끼리 합산하지 않습니다. CPU와 RAM으로만
 계산한 예시이므로 이미지·로그·ephemeral storage, Pod overhead, 실제 시스템 부하를
@@ -79,6 +78,11 @@ Terraform은 추가로 각 대상 Project에서 다음을 구성합니다.
 - Google-managed OS Config Service Agent 생성
 - 위 Service Agent에 `roles/osconfig.serviceAgent` 부여
 - Project metadata `enable-osconfig=TRUE` 적용
+
+OS Config 설정은 서비스 계정 IAM 등록과 같은 apply에 포함됩니다.
+`main.tf`의 `google_project_service.osconfig`가 API를 켜고,
+`google_compute_project_metadata_item.enable_osconfig`가 Project metadata를 설정합니다.
+이미 존재하는 KOTH VM은 독립 구성인 `koth/osconfig.tf`에서 shared Project에 같은 설정을 적용합니다.
 
 `roles/compute.admin`은 Project IAM을 변경하는 `Project IAM Admin` 권한은
 포함하지 않습니다. Broker 자체에는 `roles/resourcemanager.projectIamAdmin`이나
@@ -136,7 +140,8 @@ notepad projects.tfvars
 
 - `central_service_account_email`: 중앙 Broker Service Account 이메일
 - `manage_billing_iam`: 기본값 `false`. 비용 조회 권한을 나중에 등록할 때만 `true`
-- `problem_vms_running`: 기본값 `true`. `false`면 VM을 삭제하지 않고 중지
+- `problem_vms_running`: 기본값 `true`. `false`면 VM을 삭제하지 않고 중지.
+  Project 블록의 `problem_vms_running`으로 개별 Project만 실행할 수 있습니다.
 - `projects`의 key: 관리할 Project ID
 - `projects`의 각 값: 해당 Project의 기존 `billing_account_id`, `region`, `zone`
 
@@ -187,18 +192,18 @@ Broker 비용 조회는 별도 API와 UI 버튼으로 동작하며 VM verify/syn
 
 ## IAM 적용 후 VM 생성
 
-`projects.tfvars`에는 테스트할 두 Project만 유지하고 `manage_billing_iam = false`로
-둡니다. 같은 `terraform` 디렉터리에서 새 plan을 만듭니다.
+`projects.tfvars`에는 적용할 Project를 넣고 `manage_billing_iam = false`로 둡니다.
+같은 `terraform` 디렉터리에서 새 plan을 만듭니다.
 
 ```powershell
 terraform validate
 terraform plan "-var-file=projects.tfvars" "-out=vm.tfplan"
 ```
 
-새 Project 두 개라면 VM 8개, 고정 공인 IP 8개, VPC 2개, 서브넷 2개, 방화벽 2개가
-생성 대상입니다. Project별 heavy-01과 light-01을 이미 만든 경우에는 기존 VM과 IP의
-Terraform 주소·이름을 유지하며 VM 4개와 IP 4개만 추가합니다. 기존 리소스의 삭제나
-교체가 없는지 확인한 다음 적용합니다.
+새 Project마다 VM 2개, 고정 공인 IP 2개, VPC·서브넷·방화벽 각 1개가 생성 대상입니다.
+Project별 heavy-01과 light-01을 이미 만든 경우에는 기존 VM과 IP의 Terraform
+주소·이름을 유지합니다. `light-01`이 이미 `e2-standard-4`이면 머신 타입 변경은
+없습니다. 기존 VM이나 디스크의 교체·삭제가 계획에 나타나면 적용 전에 원인을 확인합니다.
 
 ```powershell
 terraform apply vm.tfplan
@@ -206,47 +211,24 @@ terraform output problem_vms
 ```
 
 이전 `iam.tfplan`에는 새 VM 코드가 들어 있지 않으므로 재사용하지 않습니다.
-이후 Broker에서 두 Project를 포함한 계정을 등록하고 verify/sync하여 VM을 수집한 뒤
+이후 Broker에서 적용한 Project를 포함한 계정을 등록하고 verify/sync하여 VM을 수집한 뒤
 각 VM에 Bootstrap INSTALL 작업을 실행합니다. 기존 Bootstrap이 k3s·gVisor·Node Agent를
 설치하며, Agent 관측과 ready를 확인한 뒤 운영 후보로 활성화합니다. VM 생성만으로
 Agent가 설치되거나 Runtime ready가 되는 것은 아닙니다.
 
 ## 문제 VM 일시 중지와 다시 시작
 
-`projects.tfvars`에서 `problem_vms_running = false`로 설정하면 이 state가 관리하는
-문제 VM의 `desired_status`를 `TERMINATED`로 변경합니다. GCP에서 이 값은 삭제가
-아닌 중지 상태이며 디스크, 고정 공인 IP, 네트워크와 IAM은 유지합니다. 메모리의
-프로세스 상태는 보존하지 않습니다. 이 state가 관리하지 않는 VM은 대상이 아닙니다.
-
-```powershell
-terraform plan "-var-file=projects.tfvars" "-out=vm-stop.tfplan"
-```
-
-중지만 하려면 계획이 `0 to add, N to change, 0 to destroy`이고, 변경 항목이 기존
-문제 VM의 `desired_status`뿐인지 확인합니다. 중지 옵션은 생성 여부를 제어하지
-않으므로 아직 생성하지 않은 VM이 구성에 있으면 일반 plan에 생성 작업도 포함됩니다.
-`-target`으로 기존 VM만 지정해도 의존하는 미생성 IP가 생성 대상에 포함될 수 있습니다.
-이 경우 일반 plan을 적용하지 않습니다. 이번 `vm-stop.tfplan`은 state에 존재하는
-문제 VM 전체만 `local.problem_vms`에 넣는 임시 override로 만들고, 생성·삭제가 없는지
-검증한 중지 전용 계획입니다. 계획 생성 후 override 파일은 제거하며 기존 state는
-직접 수정하지 않습니다. 이후 계획을 다시 만들 때도 미생성 VM/IP를 제외한 범위를
-확인하고, 정상 배포 전에는 원래 구성의 전체 plan을 다시 확인합니다.
-
-```powershell
-terraform apply vm-stop.tfplan
-terraform output problem_vms
-```
-
-적용 후 VM의 `current_status`가 `TERMINATED`인지 확인합니다. 다시 켤 때는
-`projects.tfvars`의 `problem_vms_running = true`로 바꾸고 새 plan을 만들어 적용합니다.
-미생성 VM을 추가하고 싶지 않으면 다시 시작할 때도 같은 기존 VM만 대상으로 잡습니다.
-중지할 때 Project를 목록에서 빼거나 `terraform destroy`를 사용하지 마세요.
-이전에 저장한 생성/시작 plan은 현재 중지 설정을 반영하지 않으므로 재사용하지 않습니다.
+`problem_vms_running`과 Project별 설정은 새 VM을 만들 때의 초기 전원 상태만
+정합니다. 기존 문제 VM의 시작·중지는 Broker 대시보드의 `전체 VM`에서 GCP 문제
+VM을 선택해 실행합니다. Terraform은 기존 VM의 `desired_status` 변경을 무시하므로
+다음 `terraform apply`가 대시보드의 전원 상태를 되돌리지 않습니다.
+중지는 VM 삭제가 아니며 디스크·고정 공인 IP·네트워크와 IAM은 유지합니다.
+메모리의 프로세스 상태는 보존하지 않습니다. Terraform 관리 목록에서 VM을 빼거나
+`terraform destroy`를 사용해 중지하지 마세요.
 
 CPU와 RAM의 실행 요금은 중지 후 멈추지만 디스크와 고정 공인 IPv4는 계속 과금됩니다.
-현재 `us-central1` 정가 기준으로 VM 네 대·디스크 300 GiB·고정 IP 네 개를 보유하면
-중지 중에도 Project당 약 $1.47/일입니다. 기존 VM 두 대·디스크 200 GiB·IP 두 개만
-있으면 약 $0.90/일이며 트래픽·세금 등은 별도입니다.
+현재 `us-central1` 정가 기준으로 VM 두 대·디스크 200 GiB·고정 IP 두 개를 보유하면
+중지 중에도 Project당 약 $0.90/일이며 트래픽·세금 등은 별도입니다.
 [중지 동작 및 과금](https://docs.cloud.google.com/compute/docs/instances/stop-start-instance),
 [디스크 요금](https://cloud.google.com/compute/disks-image-pricing),
 [공인 IPv4 요금](https://cloud.google.com/vpc/network-pricing#ipaddress).

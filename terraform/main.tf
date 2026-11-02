@@ -147,16 +147,6 @@ locals {
       machine_type      = "e2-standard-4"
       boot_disk_size_gb = 100
     }
-    light-02 = {
-      name              = "msg-problem-light-02"
-      machine_type      = "e2-standard-2"
-      boot_disk_size_gb = 50
-    }
-    light-03 = {
-      name              = "msg-problem-light-03"
-      machine_type      = "e2-standard-2"
-      boot_disk_size_gb = 50
-    }
   }
 
   problem_vms = {
@@ -234,8 +224,15 @@ resource "google_compute_instance" "problems" {
   name           = each.value.name
   zone           = var.projects[each.value.project_id].zone
   machine_type   = each.value.machine_type
-  desired_status = var.problem_vms_running ? "RUNNING" : "TERMINATED"
+  desired_status = coalesce(var.projects[each.value.project_id].problem_vms_running, var.problem_vms_running) ? "RUNNING" : "TERMINATED"
   tags           = ["msg-problem"]
+  metadata = {
+    ssh-keys = "sla:${trimspace(file("${path.module}/sla_to_control.pub"))}"
+  }
+
+  lifecycle {
+    ignore_changes = [desired_status]
+  }
 
   boot_disk {
     auto_delete = true
