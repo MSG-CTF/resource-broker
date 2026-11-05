@@ -54,6 +54,18 @@ resource "azurerm_shared_image_version" "v5" {
     regional_replica_count = 1
     storage_account_type   = "Standard_LRS"
   }
+
+  target_region {
+    name                   = "koreasouth"
+    regional_replica_count = 1
+    storage_account_type   = "Standard_LRS"
+  }
+
+  target_region {
+    name                   = "japaneast"
+    regional_replica_count = 1
+    storage_account_type   = "Standard_LRS"
+  }
 }
 
 output "image_version_id" {

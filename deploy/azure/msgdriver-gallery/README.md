@@ -14,10 +14,13 @@ terraform apply
 terraform output image_version_id
 ```
 
-이미지 버전은 `koreacentral`의 `Standard_LRS` 복제본 1개만 저장합니다. 다른
-리전에서 VM을 만들려면 해당 리전에 이미지 버전 복제본을 추가해야 하며, 지역마다
-저장 비용이 증가합니다. 원본 v5 스냅샷은 별도 복구 경로의 기준이므로 이
-Terraform은 삭제하지 않습니다. 상태 파일은 비공개로 보관하세요.
+이미지 버전은 현재 Azure에 있는 그대로 `koreacentral`, `koreasouth`, `japaneast`에
+`Standard_LRS` 복제본을 각각 1개씩 유지합니다. 리전마다 저장 비용이 발생합니다.
+원본 v5 스냅샷은 별도 복구 경로의 기준이므로 이 Terraform은 삭제하지 않습니다.
+적용 전 `terraform plan`에서 복제 지역이 제거되거나 이미지가 교체되지 않는지
+확인하세요. 상태 파일은 비공개로 보관하세요.
+
+다른 구독은 이 Gallery를 복제하지 않고 위 `image_version_id`를 참조합니다.
 
 다른 테넌트의 사람이나 자동화 앱이 이미지를 사용하려면 소스 Gallery에 대한
 읽기 권한과 대상 리소스 그룹의 생성 권한이 각각 필요합니다. 계정·앱 주체를

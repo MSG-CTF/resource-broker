@@ -13,6 +13,7 @@ Terraform이 자동으로 관리 대상으로 가져오지 않으므로 `vm_name
 | 이미지 | 소스 구독 `msgdrivergallery/msgdriver-v5/1.0.0` |
 | 보안 | vTPM 켜짐, Secure Boot 꺼짐 |
 | OS 디스크 | `Standard_LRS`, 127 GiB |
+| 인바운드 | 기존 강재민 VM과 같이 Runtime 공인 IP `34.9.255.41/32`에서 443/tcp만 허용 |
 
 특수화 이미지이므로 관리자 계정, 암호, Windows 컴퓨터 이름과 CMID는 원본에서
 유지됩니다. Azure VM 이름만 `vm_name`으로 새로 지정됩니다. Terraform state에
@@ -36,7 +37,8 @@ az account show --query "{subscription:id,tenant:tenantId}" -o json
 $env:TF_VAR_tenant_id = '<TENANT_ID>'
 $env:TF_VAR_subscription_id = '<SUBSCRIPTION_ID>'
 $env:TF_VAR_resource_group_name = '<RESOURCE_GROUP_NAME>'
-$env:TF_VAR_vm_name = 'msgdriver01'
+$env:TF_VAR_location = 'japaneast'
+$env:TF_VAR_vm_name = 'msgdrv-je-01'
 $env:TF_VAR_source_image_version_id = '<SOURCE_IMAGE_VERSION_ID_FROM_GALLERY_OUTPUT>'
 
 $stateDir = Join-Path $HOME "msgdriver-terraform-state/$env:TF_VAR_subscription_id/$env:TF_VAR_vm_name"
@@ -73,10 +75,19 @@ AzureRM provider는 리소스 공급자 자동 등록을 끕니다. 대상 구�
 `Microsoft.Compute`, `Microsoft.Network`가 등록되지 않았다면 구독 소유자가
 등록해야 합니다.
 
+강재민 구독과 같은 6대 구성은 각 대상 구독에서 `japaneast`에 3대,
+`koreacentral`에 3대를 이 디렉터리의 Terraform으로 한 대씩 만듭니다.
+VM 이름은 `msgdrv-je-01`~`03`, `msgdrv-kc-01`~`03`으로 지정하고 각 이름에 맞춰
+`TF_VAR_location`을 설정합니다.
+`source_image_version_id`는 여섯 번 모두 나건하 구독의 같은 Gallery 이미지 버전 ID를
+사용합니다. 대상 구독마다 Gallery를 새로 만들지 않습니다. VM 이름과 위치를 바꿀
+때마다 별도 state 경로를 사용하세요. 현재 Runtime 공인 IP가 위 443 규칙의 주소와
+같은지 적용 전에 확인하세요.
+
 기본 설정은 고정 공인 IP를 만들지만, 할당량이 부족하거나 사설망 검증만 할 때는
 `public_ip_enabled = false`로 만들지 않을 수 있습니다. NSG에 인바운드 허용
-규칙을 추가하지 않습니다.
-3389/tcp RDP도 열지 않습니다. 운영자 접속이 필요하면 별도 경로를 준비하세요.
+규칙은 Runtime의 443/tcp만 추가합니다. 3389/tcp RDP는 열지 않습니다.
+운영자 접속이 필요하면 별도 경로를 준비하세요.
 이 Terraform은 v5 이미지 내용을 그대로 복제하며, VM마다 고유해야 하는
 인증서·토큰이나 Windows 식별자를 새로 발급하지 않습니다.
 
@@ -94,6 +105,9 @@ OS 디스크를 Gallery 이미지 버전에서 복구한 뒤 Broker는 Azure 제
 조회하고 Azure Run Command로 서버 인증서를 새로 생성합니다. Broker는 서버의
 공개 인증서를 인증된 Windows VM 연결 응답에 넣은 다음 VM을 `READY`로 바꿉니다.
 Runtime 클라이언트는 그 인증서 한 장과 대상 IP를 검증해 EXE를 보냅니다.
+서로 다른 복구 이미지를 사용하는 VM은 `WINDOWS_RESET_SOURCE_IDS_JSON`에
+Broker `resource_target_id`를 Gallery 이미지 버전 또는 스냅샷 ARM ID에 매핑합니다.
+매핑하지 않은 VM은 기존 `WINDOWS_RESET_SOURCE_ID`를 사용합니다.
 
 복원 과정은 새 OS 디스크가 연결되고 실행기 상태 확인이 성공한 뒤 분리된 이전
 OS 디스크를 삭제합니다. 복원용 Azure identity에는 대상 디스크에 대한

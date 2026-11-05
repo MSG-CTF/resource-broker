@@ -96,13 +96,16 @@ class AzureWindowsResetTarget:
     source_id: str
     expected_vm_id: str
     execution_id: UUID
+    source_tenant_id: str | None = None
+    source_client_id: str | None = None
 
 
 class AzureWindowsResetAdapter:
-    def __init__(self, target: AzureWindowsResetTarget, compute, network=None):
+    def __init__(self, target: AzureWindowsResetTarget, compute, network=None, source_credential=None):
         self.target = target
         self.compute = compute
         self.network = network
+        self.source_credential = source_credential
 
     @classmethod
     def from_google_oidc(cls, target: AzureWindowsResetTarget):
@@ -111,9 +114,25 @@ class AzureWindowsResetAdapter:
             from azure.mgmt.network import NetworkManagementClient
 
             credential = azure_federated_credential(target.tenant_id, target.client_id)
-            return cls(target, ComputeManagementClient(credential, target.subscription_id), NetworkManagementClient(credential, target.subscription_id))
+            source_credential = None
+            if source_resource_parts(target.source_id)[1].lower() != target.subscription_id.lower():
+                if not target.source_tenant_id or not target.source_client_id:
+                    raise AzureWindowsResetError("source federation")
+                source_credential = azure_federated_credential(target.source_tenant_id, target.source_client_id)
+            return cls(target, ComputeManagementClient(credential, target.subscription_id), NetworkManagementClient(credential, target.subscription_id), source_credential)
+        except AzureWindowsResetError:
+            raise
         except Exception as error:
             raise AzureWindowsResetError("authentication") from error
+
+    def _source_headers(self) -> dict[str, str]:
+        if self.source_credential is None:
+            return {}
+        try:
+            token = self.source_credential.get_token("https://management.azure.com/.default").token
+        except Exception as error:
+            raise AzureWindowsResetError("source authentication") from error
+        return {"x-ms-authorization-auxiliary": f"Bearer {token}"}
 
     def _vm(self):
         subscription_id, group, name = vm_resource_parts(self.target.expected_vm_id)
@@ -267,6 +286,7 @@ class AzureWindowsResetAdapter:
                             "msgdriver-previous-disk-name": old_name,
                         },
                     ),
+                    headers=self._source_headers(),
                 ).result()
             if (
                 (replacement.tags or {}).get("msgdriver-execution-id") != str(self.target.execution_id)
@@ -297,7 +317,7 @@ class AzureWindowsResetAdapter:
                 # Azure requires the original createOption and image reference on VM update.
                 vm.storage_profile.os_disk.managed_disk.id = replacement.id
                 vm.storage_profile.os_disk.name = replacement.name
-                self.compute.virtual_machines.begin_create_or_update(group, name, vm).result()
+                self.compute.virtual_machines.begin_create_or_update(group, name, vm, headers=self._source_headers()).result()
             view = self.compute.virtual_machines.instance_view(group, name)
             running = any(_value(getattr(status, "code", None)) == "powerstate/running" for status in (getattr(view, "statuses", None) or ()))
             if not running:

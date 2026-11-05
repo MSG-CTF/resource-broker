@@ -43,6 +43,20 @@ resource "azurerm_network_security_group" "msgdriver" {
   resource_group_name = data.azurerm_resource_group.target.name
 }
 
+resource "azurerm_network_security_rule" "runtime_executor" {
+  name                        = "AllowRuntimeExecutor443"
+  priority                    = 300
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "443"
+  source_address_prefix       = "34.9.255.41/32"
+  destination_address_prefix  = "*"
+  resource_group_name         = data.azurerm_resource_group.target.name
+  network_security_group_name = azurerm_network_security_group.msgdriver.name
+}
+
 resource "azurerm_public_ip" "msgdriver" {
   count               = var.public_ip_enabled ? 1 : 0
   name                = "${var.vm_name}-ip"
@@ -97,7 +111,7 @@ resource "azurerm_windows_virtual_machine" "msgdriver" {
     caching = "ReadWrite"
   }
 
-  depends_on = [azurerm_network_interface_security_group_association.msgdriver]
+  depends_on = [azurerm_network_interface_security_group_association.msgdriver, azurerm_network_security_rule.runtime_executor]
 }
 
 output "vm_id" {

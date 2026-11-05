@@ -53,6 +53,25 @@ def _configuration() -> tuple[str, dict[UUID, str]]:
     return source_id, result
 
 
+def _source_for_target(resource_target_id: UUID, default_source: str, targets: dict[UUID, str]) -> str:
+    raw = os.getenv("WINDOWS_RESET_SOURCE_IDS_JSON", "").strip()
+    if not raw:
+        return default_source
+    values = json.loads(raw)
+    if not isinstance(values, dict):
+        raise ValueError("Windows reset source overrides must be an object.")
+    sources = {}
+    for key, source_id in values.items():
+        if not isinstance(key, str) or not isinstance(source_id, str):
+            raise ValueError("Each Windows reset source override needs a Broker UUID and Azure image ID.")
+        target_id = UUID(key)
+        if target_id not in targets or target_id in sources:
+            raise ValueError("Windows reset source override target is not configured or is duplicated.")
+        source_resource_parts(source_id)
+        sources[target_id] = source_id
+    return sources.get(resource_target_id, default_source)
+
+
 def process_one() -> bool:
     source_id, targets = _configuration()
     if not targets:
@@ -66,6 +85,7 @@ def process_one() -> bool:
             return False
         target, account, connection, execution = row
         resource_target_id = target.resource_target_id
+        target_source_id = _source_for_target(resource_target_id, source_id, targets)
         config = account.provider_config or {}
         try:
             # shortcut: hold one VM row lock through Azure calls; use durable leases for high reset concurrency.
@@ -76,14 +96,28 @@ def process_one() -> bool:
             subscription_id, _, _ = vm_resource_parts(targets[resource_target_id])
             if subscription_id.lower() != target.provider_scope_id.lower():
                 raise AzureWindowsResetError("Broker VM subscription")
+            source_subscription_id = source_resource_parts(target_source_id)[1]
+            source_account = None
+            source_config = {}
+            if source_subscription_id.lower() != subscription_id.lower():
+                source_account = repository.azure_account_for_subscription(source_subscription_id)
+                source_config = (source_account.provider_config or {}) if source_account else {}
+                if (
+                    source_account is None or not source_account.enabled
+                    or source_account.auth_method != "GOOGLE_OIDC_CLIENT_ASSERTION"
+                    or not isinstance(source_config.get("client_id"), str)
+                ):
+                    raise AzureWindowsResetError("source account")
             adapter_target = AzureWindowsResetTarget(
                 tenant_id=account.external_account_id,
                 client_id=config["client_id"],
                 subscription_id=subscription_id,
                 instance_id=target.provider_instance_id,
-                source_id=source_id,
+                source_id=target_source_id,
                 expected_vm_id=targets[resource_target_id],
                 execution_id=connection.current_execution_id,
+                source_tenant_id=source_account.external_account_id if source_account else None,
+                source_client_id=source_config.get("client_id") if source_account else None,
             )
             executor_certificate_pem, public_ip = AzureWindowsResetAdapter.from_google_oidc(adapter_target).restore()
         except AzureWindowsResetError as error:

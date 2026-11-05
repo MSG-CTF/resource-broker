@@ -2,7 +2,7 @@ from uuid import UUID
 
 from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.tables import ProviderAccountTable, ResourceTargetTable
@@ -22,6 +22,17 @@ class WindowsRuntimeRepository:
 
     def account(self, account_id: UUID):
         return self.session.get(ProviderAccountTable, account_id)
+
+    def azure_account_for_subscription(self, subscription_id: str):
+        accounts = self.session.scalars(
+            select(ProviderAccountTable).where(ProviderAccountTable.provider == Provider.AZURE)
+        ).all()
+        matches = [
+            account for account in accounts
+            if isinstance((account.provider_config or {}).get("subscription_ids"), list)
+            and subscription_id.lower() in (account.provider_config or {})["subscription_ids"]
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     def connection(self, resource_target_id: UUID):
         return self.session.get(WindowsVmConnectionTable, resource_target_id)
@@ -70,7 +81,7 @@ class WindowsRuntimeRepository:
                 execution.recovery_delivered_at.is_(None),
                 or_(execution.recovery_retry_at.is_(None), execution.recovery_retry_at <= now),
             )
-            .order_by(execution.finished_at, execution.execution_id)
+            .order_by(func.coalesce(execution.recovery_retry_at, execution.finished_at), execution.execution_id)
             .limit(1)
             .with_for_update(skip_locked=True)
         )

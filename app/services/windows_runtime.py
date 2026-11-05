@@ -50,7 +50,7 @@ class WindowsRuntimeService:
         self._target(resource_target_id)
         connection = self.repository.connection(resource_target_id)
         if connection is None:
-            raise WindowsRuntimeError("WINDOWS_CONNECTION_NOT_CONFIGURED", "Verified Windows RDP connection information has not been configured.")
+            raise WindowsRuntimeError("WINDOWS_CONNECTION_NOT_CONFIGURED", "Windows execution settings have not been configured.")
         return connection
 
     def configured_connections(self):

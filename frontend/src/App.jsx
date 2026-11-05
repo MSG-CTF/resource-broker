@@ -450,10 +450,10 @@ function WindowsExecutionStatus({ connection, loading, error }) {
         : state === "RESET_REQUIRED"
           ? "익스 종료 · 초기화 필요"
           : connection?.enabled === false
-            ? "RDP 연결 비활성"
+            ? "익스 실행 비활성"
             : state === "READY"
-              ? "익스 대기"
-              : "RDP 연결 미설정";
+              ? "익스 요청 대기"
+              : "익스 실행 설정 없음";
   const badgeState = state === "READY" && connection?.enabled === false ? "UNAVAILABLE" : state || "UNKNOWN";
   return <StatusBadge value={badgeState} label={label} />;
 }
