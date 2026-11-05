@@ -6,16 +6,18 @@ from sqlalchemy.orm import Session
 
 from app.adapters.gcp import GcpAdapter
 from app.domain.enums import Provider
+from app.domain.koth import KOTH_GCP_PROJECT_IDS
 from app.repositories.provider_accounts import ResourceTargetRepository
 
 
-POWER_PROJECT_IDS = frozenset({
-    "msg-60242078", "msg-60222143", "msg-60222538",
+POWER_PROJECT_IDS = KOTH_GCP_PROJECT_IDS | frozenset({
     "msg-60222538-2", "msg-60222143-2", "msg-60251955", "msg-60251955-512519",
     "msg-60222535", "msg-60222535-2", "msg-60222535-3", "msg-60251950",
-    "msg-60222513", "msg-602221513-2",
+    "msg-60222138-513705", "msg-60222138-1-513813", "msg-60222138-2",
+    "msg-60251950-3", "msg-60251950-4",
+    "msg-60222513", "msg-602221513-2", "project-a979ce28-082b-41b2-add",
+    "msg-60232359-2",
 })
-KOTH_PROJECT_IDS = frozenset({"msg-60242078", "msg-60222143", "msg-60222538"})
 
 
 class VmPowerError(ValueError):
@@ -58,7 +60,7 @@ class GcpVmPowerService:
     @staticmethod
     def _validate_instance(resource, instance) -> None:
         tags = set(getattr(getattr(instance, "tags", None), "items", ()) or ())
-        required_tag = "msg-koth" if resource.provider_scope_id in KOTH_PROJECT_IDS else "msg-problem"
+        required_tag = "msg-koth" if resource.provider_scope_id in KOTH_GCP_PROJECT_IDS else "msg-problem"
         if (
             str(instance.id) != resource.provider_instance_id
             or instance.name != resource.instance_name

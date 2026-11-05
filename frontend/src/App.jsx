@@ -27,11 +27,17 @@ import {
 } from "./api/providerAccounts.js";
 
 const CANDIDATE_OBSERVATION_STALE_MS = 10 * 60 * 1000;
-const KOTH_PROJECT_IDS = new Set(["msg-60242078", "msg-60222143", "msg-60222538"]);
+const KOTH_PROJECT_IDS = new Set([
+  "msg-60242078", "msg-60222143", "msg-60222538",
+  "msg-60232359-3", "msg-60232359-4", "msg-60232359-5",
+]);
 const GENERAL_PROBLEM_PROJECT_IDS = new Set([
   "msg-60222538-2", "msg-60222143-2", "msg-60251955", "msg-60251955-512519",
   "msg-60222535", "msg-60222535-2", "msg-60222535-3", "msg-60251950",
-  "msg-60222513", "msg-602221513-2",
+  "msg-60222138-513705", "msg-60222138-1-513813", "msg-60222138-2",
+  "msg-60251950-3", "msg-60251950-4",
+  "msg-60222513", "msg-602221513-2", "project-a979ce28-082b-41b2-add",
+  "msg-60232359-2",
 ]);
 
 function isKothVm(resource) {
