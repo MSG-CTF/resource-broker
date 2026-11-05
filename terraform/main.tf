@@ -106,13 +106,6 @@ resource "google_project_iam_member" "central_broker" {
   project = each.value.project_id
   role    = each.value.role
   member  = local.central_service_account_member
-
-  depends_on = [
-    google_project_service.compute,
-    google_project_service.osconfig,
-    google_project_service.cloudbilling,
-    google_project_service.bigquery,
-  ]
 }
 
 # Project-wide actAs is mandatory for the requested onboarding baseline so the
