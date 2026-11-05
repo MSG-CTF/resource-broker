@@ -12,6 +12,7 @@ from app.api.admin_auth import (
 )
 from app.api.admin_agent_enrollments import router as admin_agent_enrollments_router
 from app.api.admin_bootstrap_jobs import router as admin_bootstrap_jobs_router
+from app.api.admin_gcp_credit_observations import router as admin_gcp_credit_observations_router
 from app.api.admin_provider_accounts import router as admin_provider_accounts_router
 from app.api.admin_resource_targets import router as admin_resource_targets_router
 from app.api.agent_enrollments import router as agent_enrollments_router
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_auth_router)
     app.include_router(admin_agent_enrollments_router)
     app.include_router(admin_bootstrap_jobs_router)
+    app.include_router(admin_gcp_credit_observations_router)
     app.include_router(admin_provider_accounts_router)
     app.include_router(admin_resource_targets_router)
     app.include_router(agent_enrollments_router)

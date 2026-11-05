@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AzureWindowsVm from "./AzureWindowsVm.jsx";
 import AzureManagedIdentitySetup from "./AzureManagedIdentitySetup.jsx";
@@ -13,11 +13,13 @@ import {
   getVmPowerOperation,
   getAdminToken,
   listBootstrapJobs,
+  listGcpCreditObservations,
   listProviderAccounts,
   listResourceTargetContainers,
   listResourceTargets,
   listWindowsVmStatuses,
   loginAdmin,
+  saveGcpCreditObservation,
   setAdminToken,
   setVmPower,
   syncProviderAccount,
@@ -39,6 +41,32 @@ const GENERAL_PROBLEM_PROJECT_IDS = new Set([
   "msg-60222513", "msg-602221513-2", "project-a979ce28-082b-41b2-add",
   "msg-60232359-2",
 ]);
+const GCP_BILLING_ACCOUNT_BY_PROJECT = {
+  "third-expanse-510906-r5": "0124C6-B5192B-C27C7B",
+  "msg-60222538": "01E3CD-ECCF6E-88C393",
+  "msg-60222538-2": "01E3CD-ECCF6E-88C393",
+  "msg-60222143": "01F61C-AE5ABA-27D1C6",
+  "msg-60222143-2": "01F61C-AE5ABA-27D1C6",
+  "msg-60222513": "01C3E3-425D2E-4B1549",
+  "msg-602221513-2": "01C3E3-425D2E-4B1549",
+  "msg-60251955": "01D34A-E63AC9-B60A28",
+  "msg-60251955-512519": "01D34A-E63AC9-B60A28",
+  "msg-60242078": "01BEEE-426690-6BBECC",
+  "project-a979ce28-082b-41b2-add": "01BEEE-426690-6BBECC",
+  "msg-60222535": "01EB38-622C8D-FAA79B",
+  "msg-60222535-2": "01EB38-622C8D-FAA79B",
+  "msg-60222535-3": "01EB38-622C8D-FAA79B",
+  "msg-60251950": "01BEE8-C67E69-0F9D51",
+  "msg-60251950-3": "01BEE8-C67E69-0F9D51",
+  "msg-60251950-4": "01BEE8-C67E69-0F9D51",
+  "msg-60222138-513705": "010542-95B9D3-2FE458",
+  "msg-60222138-1-513813": "010542-95B9D3-2FE458",
+  "msg-60222138-2": "010542-95B9D3-2FE458",
+  "msg-60232359-2": "010153-E591DC-5EA9E7",
+  "msg-60232359-3": "010153-E591DC-5EA9E7",
+  "msg-60232359-4": "010153-E591DC-5EA9E7",
+  "msg-60232359-5": "010153-E591DC-5EA9E7",
+};
 
 function isKothVm(resource) {
   return resource.provider === "GCP" && KOTH_PROJECT_IDS.has(resource.scope_id);
@@ -734,6 +762,7 @@ function RegisterForm({ onCreated }) {
 function AccountTable({
   accounts,
   actionState,
+  creditReads,
   onVerify,
   onSync,
   onCredit,
@@ -775,6 +804,8 @@ function AccountTable({
               actionState === `credit:${account.account_id}`;
             const isDeleting = actionState === `delete:${account.account_id}`;
             const scopes = accountScopes(account);
+            const billingAccountId = scopes.map((scope) => GCP_BILLING_ACCOUNT_BY_PROJECT[scope]).find(Boolean);
+            const creditRead = creditReads[billingAccountId];
 
             return (
               <tr key={account.account_id}>
@@ -787,6 +818,14 @@ function AccountTable({
                       </strong>
                       <span>{account.external_account_id}</span>
                       <span className="provider-name">{definition.label}</span>
+                      {account.provider === "GCP" && (
+                        <span className="account-credit" title={creditRead?.error || undefined}>
+                          잔여 크레딧: {billingAccountId
+                            ? creditRead?.amount || (creditRead?.status === "loading" ? "조회 중..." : "조회불가")
+                            : "조회불가"}
+                        </span>
+                      )}
+                      {creditRead?.amount && <small className="account-credit-time">{formatDate(creditRead.readAt)} 조회</small>}
                       {needsFederation && <em>자동 연동 설정 필요</em>}
                       {account.provider === "AWS" && (
                         <details className="aws-onboarding-values">
@@ -852,10 +891,10 @@ function AccountTable({
                         className="button button-secondary"
                         type="button"
                         disabled={Boolean(actionState)}
-                        title="GCP 프로모션 크레딧 추정 잔액 조회"
+                        title="BigQuery 기반 추정 잔액 설정 및 조회"
                         onClick={() => onCredit(account)}
                       >
-                        {isCheckingCredit ? "조회 중..." : "비용 조회"}
+                        {isCheckingCredit ? "조회 중..." : "추정치 설정"}
                       </button>
                     )}
                     <button
@@ -1891,12 +1930,92 @@ function AdminDashboard({ onLogout }) {
   const [creditEstimate, setCreditEstimate] = useState(null);
   const [creditLoading, setCreditLoading] = useState(false);
   const [creditError, setCreditError] = useState(null);
+  const [creditReads, setCreditReads] = useState({});
+  const creditRefreshRunning = useRef(false);
   const [azureManagedAccount, setAzureManagedAccount] = useState(null);
+
+  const readGcpCredit = useCallback((billingAccountId) => new Promise((resolve) => {
+    const requestId = crypto.randomUUID();
+    setCreditReads((current) => ({
+      ...current,
+      [billingAccountId]: { ...current[billingAccountId], status: "loading", error: null },
+    }));
+    let resultTimeout;
+    const extensionTimeout = window.setTimeout(() => finish({ status: "error", error: "Chrome 확장 기능을 설치하고 Broker 페이지를 새로고침하세요." }), 2000);
+
+    async function finish(result) {
+      window.clearTimeout(extensionTimeout);
+      window.clearTimeout(resultTimeout);
+      window.removeEventListener("message", onMessage);
+      if (result.amount) {
+        try {
+          const saved = await saveGcpCreditObservation(billingAccountId, result.amount);
+          setCreditReads((current) => ({
+            ...current,
+            [billingAccountId]: {
+              status: "success", amount: saved.amount, readAt: saved.observed_at,
+            },
+          }));
+          resolve();
+          return;
+        } catch {
+          result = { status: "error", error: "잔액을 읽었지만 Broker에 저장하지 못했습니다." };
+        }
+      }
+      setCreditReads((current) => ({
+        ...current,
+        [billingAccountId]: { ...current[billingAccountId], status: result.status, error: result.error },
+      }));
+      resolve();
+    }
+
+    function onMessage(event) {
+      if (event.source !== window || event.origin !== window.location.origin
+        || event.data?.source !== "msg-broker-credit-extension"
+        || event.data.requestId !== requestId) return;
+      if (event.data.type === "GCP_CREDIT_ACK") {
+        window.clearTimeout(extensionTimeout);
+        resultTimeout = window.setTimeout(() => finish({ status: "error", error: "Google Cloud 로그인 상태 또는 결제 화면을 확인하세요." }), 30000);
+      } else if (event.data.type === "GCP_CREDIT_RESULT") {
+        finish(event.data.amount
+          ? { status: "success", amount: event.data.amount, readAt: event.data.readAt }
+          : { status: "error", error: "Google Cloud 로그인 상태 또는 결제 화면을 확인하세요." });
+      }
+    }
+
+    window.addEventListener("message", onMessage);
+    window.postMessage({ source: "msg-broker-credit-page", type: "GCP_CREDIT_REQUEST", requestId, billingAccountId }, window.location.origin);
+  }), []);
+
+  const refreshGcpCredits = useCallback(async (billingAccountIds) => {
+    if (creditRefreshRunning.current) return;
+    creditRefreshRunning.current = true;
+    try {
+      for (let index = 0; index < billingAccountIds.length; index += 2) {
+        await Promise.all(billingAccountIds.slice(index, index + 2).map(readGcpCredit));
+      }
+    } finally {
+      creditRefreshRunning.current = false;
+    }
+  }, [readGcpCredit]);
 
   const loadAccounts = useCallback(async () => {
     try {
-      const response = await listProviderAccounts();
+      const [response, observations] = await Promise.all([
+        listProviderAccounts(), listGcpCreditObservations(),
+      ]);
       setAccounts(response.items);
+      setCreditReads((current) => ({
+        ...current,
+        ...Object.fromEntries(observations.items.map((item) => [
+          item.billing_account_id,
+          { status: "saved", amount: item.amount, readAt: item.observed_at },
+        ])),
+      }));
+      const billingAccountIds = new Set(response.items
+        .filter((account) => account.provider === "GCP")
+        .flatMap((account) => accountScopes(account).map((scope) => GCP_BILLING_ACCOUNT_BY_PROJECT[scope]).filter(Boolean)));
+      void refreshGcpCredits([...billingAccountIds]);
       setConnected(true);
       setError(null);
     } catch (requestError) {
@@ -1905,7 +2024,7 @@ function AdminDashboard({ onLogout }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshGcpCredits]);
 
   const loadResources = useCallback(async ({ signal } = {}) => {
     setResourceLoading(true);
@@ -2286,6 +2405,7 @@ function AdminDashboard({ onLogout }) {
                     <AccountTable
                       accounts={accounts}
                       actionState={actionState}
+                      creditReads={creditReads}
                       onVerify={handleVerify}
                       onSync={handleSync}
                       onCredit={handleCredit}

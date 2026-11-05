@@ -140,6 +140,16 @@ class ProviderAccountTable(Base):
     )
 
 
+class GcpCreditObservationTable(Base):
+    __tablename__ = "gcp_credit_observations"
+
+    billing_account_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    amount: Mapped[str] = mapped_column(String(32), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class ResourceTargetTable(Base):
     __tablename__ = "resource_targets"
     __table_args__ = (

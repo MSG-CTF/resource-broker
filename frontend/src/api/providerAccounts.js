@@ -74,6 +74,17 @@ export function listProviderAccounts() {
   return request("/v1/admin/provider-accounts");
 }
 
+export function listGcpCreditObservations() {
+  return request("/v1/admin/gcp-credit-observations");
+}
+
+export function saveGcpCreditObservation(billingAccountId, amount) {
+  return request(`/v1/admin/gcp-credit-observations/${encodeURIComponent(billingAccountId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ amount }),
+  });
+}
+
 export function listResourceTargets({ provider = "", accountId = "", signal } = {}) {
   const query = new URLSearchParams();
   if (provider) query.set("provider", provider);

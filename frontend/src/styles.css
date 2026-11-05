@@ -240,6 +240,8 @@ tbody tr:hover { background: #fbfcfe; }
 .account-cell strong { color: #202a3f; font-size: 13px; }
 .account-cell span { color: #7c8799; font-size: 11px; }
 .account-cell .provider-name { color: #9aa3b2; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.account-cell .account-credit { color: #2d68e6; font-size: 11px; font-weight: 800; }
+.account-cell .account-credit-time { color: #7c8799; font-size: 10px; }
 .account-cell em { width: fit-content; padding: 2px 6px; color: #8b5a13; background: #fff5db; border-radius: 5px; font-size: 10px; font-style: normal; font-weight: 700; }
 .provider-avatar { width: 32px; height: 32px; display: grid; place-items: center; color: #2f64ce; background: #edf3ff; border: 1px solid #d8e4fb; border-radius: 9px; font-weight: 850; }
 .project-list { min-width: 170px; display: grid; gap: 5px; }

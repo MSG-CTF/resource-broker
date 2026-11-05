@@ -145,6 +145,30 @@ class GcpCreditTrackingConfig(GcpCreditTrackingUpdateRequest):
     baseline_at: datetime
 
 
+class GcpCreditObservationUpdateRequest(ApiSchema):
+    amount: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=32, strict=True),
+    ]
+
+    @field_validator("amount")
+    @classmethod
+    def require_display_amount(cls, value: str) -> str:
+        if not value.isprintable() or not any("0" <= char <= "9" for char in value):
+            raise ValueError("amount must be printable and contain a digit")
+        return value
+
+
+class GcpCreditObservationResponse(ApiSchema):
+    billing_account_id: GcpBillingAccountId
+    amount: str
+    observed_at: datetime
+
+
+class GcpCreditObservationListResponse(ApiSchema):
+    items: list[GcpCreditObservationResponse]
+
+
 class GcpAccountCreateConfig(ApiSchema):
     project_ids: list[ProviderIdentifier] = Field(min_length=1)
 

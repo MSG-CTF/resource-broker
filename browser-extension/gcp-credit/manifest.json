@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "MSG Broker GCP Credit Reader",
+  "version": "0.1.0",
+  "description": "Reads available free trial credit from Google Cloud billing for MSG Broker.",
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://broker.mjsec.kr/*"],
+      "js": ["broker.js"]
+    },
+    {
+      "matches": ["https://console.cloud.google.com/billing/*"],
+      "js": ["google.js"]
+    }
+  ]
+}
