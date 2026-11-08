@@ -1,148 +1,36 @@
-# MSG Resource Broker
+# MSG CTF Resource Broker
 
-AWS, GCP, Azure VM inventory를 공통 snapshot으로 관리하는 Resource Broker다.
+여러 클라우드의 VM과 실행 노드를 모아 관리하고, 스케줄러에 사용 가능한 자원을 알려주는 서비스입니다
+CPU·메모리·디스크 예약 원장을 기준으로 배정·확정·반납을 처리합니다
 
-## Compose 구성
+[플랫폼 전체 소개](https://github.com/MSG-CTF/msg-ctf.github.io)
 
-`compose.yaml`은 운영 안전 기본값이다.
+## 맡은 일
 
-- PostgreSQL과 FastAPI는 호스트 포트에 공개하지 않는다.
-- React Admin UI는 정적 파일로 빌드해 Nginx가 제공한다.
-- Nginx만 기본적으로 `127.0.0.1:8080`에 공개한다.
-- DB/Admin secret은 `.env`에 반드시 설정해야 한다.
-- GCE에서는 별도 JSON key 없이 attached Service Account의 metadata ADC를 쓴다.
-- AWS inventory와 Bootstrap은 같은 GCP Service Account의 Google OIDC ID Token을
-  AWS STS Hub/target-account Role로 교환하며 AWS Access Key를 저장하지 않는다.
-- Azure inventory와 Bootstrap은 같은 Google OIDC ID Token을 Entra Federated
-  Credential로 교환하며 Azure Client Secret을 저장하지 않는다.
+- AWS·GCP·Azure 인벤토리를 공통 형식으로 수집
+- 실행 조건에 맞는 후보 조회와 자원 예약·확정·반납
+- 관리자 계정·노드·할당 용량 조회와 관리 콘솔
+- 승인된 문제의 전용 VM 배정과 K3s 인증정보 제공
+- 기동 CPU를 기본 CPU로 낮춰 확정하고 사용 가능한 용량에 반영
+- 노드 초기 준비와 클라우드 인증 연결
 
-`compose.dev.yaml`은 로컬 개발 편의만 추가한다.
+## 함께 만든 사람들
 
-- PostgreSQL: `127.0.0.1:5432`
-- FastAPI: `127.0.0.1:8000`
-- Vite: `127.0.0.1:5173`
+| 기여자 | 기여 내용 | 관련 PR |
+| --- | --- | --- |
+| [gonas0919](https://github.com/gonas0919) | 멀티 클라우드 인벤토리, 후보·예약 API, 관리 콘솔과 노드 준비 | [#4](https://github.com/MSG-CTF/resource-broker/pull/4) |
+| [jongcoding](https://github.com/jongcoding) | 전용 VM·할당량 연동, 인벤토리 오류 수정과 기동 CPU 예약 축소 | [#5](https://github.com/MSG-CTF/resource-broker/pull/5) · [#7](https://github.com/MSG-CTF/resource-broker/pull/7) · [#13](https://github.com/MSG-CTF/resource-broker/pull/13) |
 
-## 최초 환경 설정
+2026-11-09까지 병합된 PR과 커밋을 기준으로 정리했습니다
 
-```powershell
-Copy-Item .env.example .env
-```
+## 기술 구성
 
-`.env`에서 최소한 다음 값을 실제 값으로 교체한다.
+Python · FastAPI · SQLAlchemy · PostgreSQL · React · Docker
 
-- `POSTGRES_PASSWORD`
-- `DATABASE_URL` 안의 URL-encoded DB password
-- `ADMIN_ID`
-- `ADMIN_PASSWORD`
-- `ADMIN_TOKEN_SECRET` (최소 32자 random 값)
+## 개발·운영 문서
 
-`.env`와 Cloud credential은 commit하지 않는다.
-
-## GCP 운영/비공개 테스트 실행
-
-GCE에 전용 Service Account를 연결한 뒤 로컬 ADC override 없이 실행한다.
-
-```powershell
-docker compose up -d --build
-docker compose ps
-docker compose logs --tail=200 migrate
-docker compose logs --tail=200 app
-```
-
-기본 Compose만 사용할 때 Admin UI는 GCE의 loopback에만 열리므로 SSH tunnel로
-접속한다.
-
-```powershell
-gcloud compute ssh BROKER_VM --project=BROKER_PROJECT --zone=BROKER_ZONE -- -L 8080:127.0.0.1:8080
-```
-
-브라우저에서 `http://127.0.0.1:8080`을 연다.
-
-운영 GCE에는 호스트 Nginx가 `broker.mjsec.kr`의 일반 HTTPS와
-`agents.mjsec.kr`의 Agent mTLS를 종료한다. Docker의 loopback bind는 유지하며
-Public IP나 `0.0.0.0`으로 변경하지 않는다. Gateway 설정과 Agent 인증서 절차는
-다음 문서에 있다.
-
-- `deploy/nginx/msg-broker.conf`
-- `deploy/mtls/README.md`
-
-## Node Agent Bootstrap
-
-Ubuntu AMD64/ARM64 대상 VM의 운영동형 설치는
-`deploy/bootstrap/node-agent-bootstrap.sh`를 사용한다. 공통 Bootstrap은 지정
-버전 k3s 설치, VM-local CSR/1회용 token enrollment, Node annotation, digest
-고정 Agent DaemonSet rollout과 실제 Broker 전달 확인까지 수행한다.
-
-2026-08-10 깨끗한 GCP VM의 수동 Canary에서 최종
-`BOOTSTRAP_STATUS=ready`를 확인했다. 이는 공통 package 검증 완료를 뜻하며,
-Provider 관리면을 통한 약 100대 검증이 완료됐다는 뜻은 아니다. GCP VM
-Manager/OS Config와 AWS Systems Manager adapter는 구현됐으며 실제 Canary 검증은
-각 Provider에서 별도로 수행해야 한다.
-
-전체 bundle/API/실행 계약은 `deploy/bootstrap/README.md`를 참고한다. 운영에서는
-개인 SSH/SCP로 VM마다 token과 bundle을 전달하지 않는다.
-
-## AWS Provider
-
-AWS는 계정 하나당 Provider Account 하나를 등록하고, 명시한 Region을
-`provider_scope_id`로 사용한다. 중앙 federation Hub Role이 서로 독립적으로
-소유된 AWS 계정의 고정 이름 Role을 계정별 External ID와 함께 Assume한다.
-
-- 인증: GCP metadata Google OIDC → STS `AssumeRoleWithWebIdentity` → STS
-  `AssumeRole`
-- 조회: EC2 instances, instance types, attached EBS volumes
-- Storage: 연결된 EBS 합계이며 instance store는 제외
-- 부분 실패: 성공한 Region만 갱신하고 실패 Region의 마지막 정상 snapshot은 보존
-- Bootstrap: 별도 `MsgBrokerBootstrapRole`로 opt-in tag가 붙은 Ubuntu
-  AMD64/ARM64 EC2에만 SSM Run Command 실행
-- 인증서 발급: IMDSv2 EC2 instance identity RSA 서명을 검증하고 account,
-  Region, instance ID를 resource target과 일치시킴
-
-CloudFormation 템플릿과 AWS Console 적용 순서는
-`deploy/aws/README.md`를 참고한다. 고객 계정을 Organizations에 초대하거나
-AWS Access Key를 전달받지 않는다.
-
-## Azure Provider
-
-Azure는 Tenant 하나당 Entra App Registration 하나를 등록하고, 여러
-Subscription ID를 조회 범위로 사용할 수 있다.
-
-- 인증: GCP metadata Google OIDC → Entra Federated Credential → Azure 임시 토큰
-- audience: `api://AzureADTokenExchange`
-- 조회 권한: 각 Subscription의 `Reader`
-- 저장 설정: Tenant ID, Application Client ID, Subscription ID만 저장
-- 금지: Azure Client Secret을 `.env`, DB, 이미지에 저장하지 않음
-- Bootstrap: 대상 Resource Group의 제한된 Managed Run Command 권한과
-  `msg-broker-bootstrap=enabled` tag 사용
-
-Azure 계정 등록 후 Verify/Sync를 실행하면 기존 계정의 인증 메타데이터도
-Google OIDC 방식으로 갱신된다.
-
-## 로컬 개발 실행
-
-Cloud 인증이 필요 없는 개발:
-
-```powershell
-docker compose -f compose.yaml -f compose.dev.yaml up -d --build
-```
-
-로컬 GCP ADC까지 사용하는 개발:
-
-```powershell
-docker compose -f compose.yaml -f compose.dev.yaml -f compose.gcp-local.yaml up -d --build
-```
-
-상태와 로그:
-
-```powershell
-docker compose -f compose.yaml -f compose.dev.yaml ps
-docker compose -f compose.yaml -f compose.dev.yaml logs --tail=200 app frontend
-```
-
-DB volume을 보존하면서 종료:
-
-```powershell
-docker compose -f compose.yaml -f compose.dev.yaml down
-```
-
-`down -v`는 PostgreSQL 데이터를 삭제하므로 명시적인 초기화 때만 사용한다.
+- [스케줄러 API](docs/SCHEDULER_API.md)
+- [예약 검증](docs/RESERVATION_VALIDATION.md)
+- [전용 VM](docs/DEDICATED_VM.md)
+- [노드 준비 자동화](deploy/bootstrap/AUTOMATION.md)
+- [기존 개발·설정 참고 문서](README.reference.md)
