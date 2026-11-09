@@ -1,6 +1,6 @@
 <div align="center">
 <h1>MSG CTF · Resource Broker</h1>
-<p>AWS·GCP·Azure의 실행 자원을 모아 배정·예약·반납하는 서비스</p>
+<p>AWS·GCP·Azure 인벤토리 · 자원 예약·반납</p>
 <p><a href="https://msg-ctf.github.io/platform.html">플랫폼</a> · <a href="#development">개발 문서</a></p>
 </div>
 
