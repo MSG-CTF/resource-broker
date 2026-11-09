@@ -6,7 +6,7 @@
 
 <h2 align="center">Overview</h2>
 
-<p align="center"><strong>75팀 · 150명 대회, 클라우드 추가 결제 0원</strong><br><sub>무료 크레딧 적용 후 실제 추가 결제액 기준</sub></p>
+<p align="center"><strong>75팀 · 150명 · 클라우드 추가 결제 0원</strong><br><sub>크레딧 적용 후 추가 결제액 기준</sub></p>
 
 ![AWS·GCP·Azure 자원을 브로커에 연결해 함께 사용하는 구조](docs/showcase/cloud-credits.svg)
 
@@ -17,8 +17,8 @@
 | **Reservations** | CPU·메모리·디스크·아키텍처 조건에 맞는 실행 후보 제공과 자원 예약 |
 | **Reuse** | 종료 후 예약 반납, 기동 CPU 부스트가 끝나면 예약량 축소 |
 
-GCP 잔액은 Billing Export 반영 시점 기준의 추정값입니다
-자원 배정은 크레딧 잔액과 별도로, 실행 조건과 남은 용량을 기준으로 합니다
+GCP 잔액은 Billing Export 반영 시점 기준 추정값입니다
+잔액 조회와 별도로 실행 조건·남은 용량에 따라 자원을 배정합니다
 
 [크레딧 조회 API](docs/GCP_CREDIT_ESTIMATE_API.md) · [자원 예약 API](docs/SCHEDULER_API.md) · [0원 운영 기록](https://github.com/MSG-CTF/msg-ctf.github.io/blob/main/docs/cloud-cost.md)
 
