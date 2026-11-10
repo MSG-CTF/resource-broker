@@ -185,7 +185,21 @@ Commit request:
 }
 ```
 
-The deployed `resource_profile` must exactly match the held profile. A mismatch
+The deployed `resource_profile` must exactly match the held profile unless the
+commit includes the optional strict positive integer `startup_cpu_millicores`.
+For this opt-in startup path, that value must equal the original held CPU and
+the deployed CPU must be smaller and positive. Memory and disk must still match
+exactly. Scheduler must first obtain Runtime confirmation that the live Pod has
+returned to steady CPU. A missing confirmation must enter cleanup, not commit.
+
+HELD capacity is charged at the original peak. COMMITTED capacity and operator
+allocation snapshots use the confirmed deployed CPU. The original reserved
+profile remains unchanged for create replay. Commit replay also compares the
+startup marker; dropping or changing it is a different request. Existing
+clients omit it and retain exact-match behavior. The normal HELD TTL still
+applies; it is not extended by this option.
+
+A profile mismatch
 returns `409 DEPLOYED_SPEC_MISMATCH` and leaves the reservation `HELD` so the
 Scheduler can release it with reason `DEPLOYED_SPEC_MISMATCH`.
 

@@ -256,6 +256,7 @@ def commit_reservation(
             requested_at=request.requested_at,
             instance_id=request.instance_id,
             runtime_workload_id=request.runtime_workload_id,
+            startup_cpu_millicores=request.startup_cpu_millicores,
             cpu_millicores=profile.cpu_millicores,
             memory_mib=profile.memory_mib,
             ephemeral_storage_mib=profile.ephemeral_storage_mib,

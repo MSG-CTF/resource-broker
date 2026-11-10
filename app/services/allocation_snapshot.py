@@ -57,7 +57,13 @@ def allocation_snapshots(session: Session, target_ids: tuple) -> dict:
                 "team_id": reservation.team_id,
                 "reservation_status": reservation.status,
                 "expires_at": reservation.expires_at,
-                "resources": {"cpu_millicores": reservation.cpu_millicores,
+                "resources": {"cpu_millicores": (
+                    reservation.deployed_cpu_millicores
+                    if reservation.status is ReservationStatus.COMMITTED
+                    and reservation.deployed_cpu_millicores is not None
+                    and 0 < reservation.deployed_cpu_millicores <= reservation.cpu_millicores
+                    else reservation.cpu_millicores
+                ),
                               "memory_mib": reservation.memory_mib},
             })
     return snapshots

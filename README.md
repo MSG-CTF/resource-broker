@@ -1,151 +1,58 @@
-# MSG Resource Broker
+<div align="center">
+<h1>MSG CTF · Resource Broker</h1>
+<p>AWS·GCP·Azure 인벤토리 · 자원 예약·반납</p>
+<p><a href="https://msg-ctf.github.io/platform.html">플랫폼</a> · <a href="#development">개발 문서</a></p>
+</div>
 
-AWS, GCP, Azure VM inventory를 공통 snapshot으로 관리하는 Resource Broker다.
+<h2 align="center">Overview</h2>
 
-## Compose 구성
+<p align="center"><strong>75팀 · 150명 · 클라우드 추가 결제 0원</strong><br><sub>크레딧 적용 후 추가 결제액 기준</sub></p>
 
-`compose.yaml`은 운영 안전 기본값이다.
+![AWS·GCP·Azure 자원을 브로커에 연결해 함께 사용하는 구조](docs/showcase/cloud-credits.svg)
 
-- PostgreSQL과 FastAPI는 호스트 포트에 공개하지 않는다.
-- React Admin UI는 정적 파일로 빌드해 Nginx가 제공한다.
-- Nginx만 기본적으로 `127.0.0.1:8080`에 공개한다.
-- DB/Admin secret은 `.env`에 반드시 설정해야 한다.
-- GCE에서는 별도 JSON key 없이 attached Service Account의 metadata ADC를 쓴다.
-- AWS inventory와 Bootstrap은 같은 GCP Service Account의 Google OIDC ID Token을
-  AWS STS Hub/target-account Role로 교환하며 AWS Access Key를 저장하지 않는다.
-- Azure inventory와 Bootstrap은 같은 Google OIDC ID Token을 Entra Federated
-  Credential로 교환하며 Azure Client Secret을 저장하지 않는다.
+| 구현 | 하는 일 |
+| --- | --- |
+| **Multi-cloud** | AWS·GCP·Azure 계정과 VM을 공통 인벤토리로 관리 |
+| **Credits** | GCP 계정별 기준 잔액에서 Billing Export의 프로모션 사용액을 빼 잔여 크레딧 추정 |
+| **Reservations** | CPU·메모리·디스크·아키텍처 조건에 맞는 실행 후보 제공과 자원 예약 |
+| **Reuse** | 종료 후 예약 반납, 기동 CPU 부스트가 끝나면 예약량 축소 |
 
-`compose.dev.yaml`은 로컬 개발 편의만 추가한다.
+GCP 잔액은 Billing Export 반영 시점 기준 추정값입니다
+잔액 조회와 별도로 실행 조건·남은 용량에 따라 자원을 배정합니다
 
-- PostgreSQL: `127.0.0.1:5432`
-- FastAPI: `127.0.0.1:8000`
-- Vite: `127.0.0.1:5173`
+[크레딧 조회 API](docs/GCP_CREDIT_ESTIMATE_API.md) · [자원 예약 API](docs/SCHEDULER_API.md) · [0원 운영 기록](https://github.com/MSG-CTF/msg-ctf.github.io/blob/main/docs/cloud-cost.md)
 
-## 최초 환경 설정
+<h2 align="center">Contributors</h2>
 
-```powershell
-Copy-Item .env.example .env
-```
+<table align="center">
+<tr><th align="center" colspan="6"><a href="https://github.com/MSG-CTF/resource-broker">Resource Broker</a></th><th align="center" colspan="6"><a href="https://github.com/MSG-CTF">PM</a></th></tr>
+<tr>
+<td align="center" valign="top" colspan="6" width="390"><a href="https://github.com/gonas0919"><img src="https://avatars.githubusercontent.com/u/143320324?v=4&amp;s=128" width="52" height="52" alt="gonas0919"></a><br><a href="https://github.com/gonas0919"><b>gonas0919</b></a><br><sub>클라우드 인벤토리·예약<br>관리 콘솔·노드 준비</sub></td>
+<td align="center" valign="top" colspan="6" width="390"><a href="https://github.com/jongcoding"><img src="https://avatars.githubusercontent.com/u/128033808?v=4&amp;s=128" width="52" height="52" alt="jongcoding"></a><br><a href="https://github.com/jongcoding"><b>jongcoding</b></a><br><sub>전용 VM·할당량 연동<br>인벤토리 수정·CPU 예약 축소</sub></td>
+</tr>
+</table>
 
-`.env`에서 최소한 다음 값을 실제 값으로 교체한다.
+<details>
+<summary>기여 기록 · 관련 PR</summary>
 
-- `POSTGRES_PASSWORD`
-- `DATABASE_URL` 안의 URL-encoded DB password
-- `ADMIN_ID`
-- `ADMIN_PASSWORD`
-- `ADMIN_TOKEN_SECRET` (최소 32자 random 값)
+| 기여자 | 기여 내용 | 관련 PR |
+| --- | --- | --- |
+| [gonas0919](https://github.com/gonas0919) | 멀티 클라우드 인벤토리, 후보·예약 API, 관리 콘솔과 노드 준비 | [#4](https://github.com/MSG-CTF/resource-broker/pull/4) |
+| [jongcoding](https://github.com/jongcoding) | 전용 VM·할당량 연동, 인벤토리 오류 수정과 기동 CPU 예약 축소 | [#5](https://github.com/MSG-CTF/resource-broker/pull/5) · [#7](https://github.com/MSG-CTF/resource-broker/pull/7) · [#13](https://github.com/MSG-CTF/resource-broker/pull/13) |
 
-`.env`와 Cloud credential은 commit하지 않는다.
+</details>
 
-## GCP 운영/비공개 테스트 실행
+<h2 align="center">Tech Stack</h2>
 
-GCE에 전용 Service Account를 연결한 뒤 로컬 ADC override 없이 실행한다.
+<p align="center"><img src="https://raw.githubusercontent.com/MSG-CTF/msg-ctf.github.io/67e93a09ce630910f98ae56fb118ca1317af78e0/assets/tech/fastapi.svg" width="44" height="44" alt="FastAPI" title="FastAPI"> &nbsp; <img src="https://raw.githubusercontent.com/MSG-CTF/msg-ctf.github.io/67e93a09ce630910f98ae56fb118ca1317af78e0/assets/tech/postgresql.svg" width="44" height="44" alt="PostgreSQL" title="PostgreSQL"> &nbsp; <img src="https://raw.githubusercontent.com/MSG-CTF/msg-ctf.github.io/67e93a09ce630910f98ae56fb118ca1317af78e0/assets/tech/react.svg" width="44" height="44" alt="React" title="React"> &nbsp; <img src="https://raw.githubusercontent.com/MSG-CTF/msg-ctf.github.io/67e93a09ce630910f98ae56fb118ca1317af78e0/assets/tech/docker.svg" width="44" height="44" alt="Docker" title="Docker"><br><sub>FastAPI · PostgreSQL · React · Docker</sub><br><sub>Python · SQLAlchemy · AWS · GCP · Azure</sub></p>
 
-```powershell
-docker compose up -d --build
-docker compose ps
-docker compose logs --tail=200 migrate
-docker compose logs --tail=200 app
-```
+## Development
 
-기본 Compose만 사용할 때 Admin UI는 GCE의 loopback에만 열리므로 SSH tunnel로
-접속한다.
+- [스케줄러 API](docs/SCHEDULER_API.md)
+- [예약 검증](docs/RESERVATION_VALIDATION.md)
+- [전용 VM](docs/DEDICATED_VM.md)
+- [노드 준비 자동화](deploy/bootstrap/AUTOMATION.md)
+- [설치·실행 안내](README.reference.md)
 
-```powershell
-gcloud compute ssh BROKER_VM --project=BROKER_PROJECT --zone=BROKER_ZONE -- -L 8080:127.0.0.1:8080
-```
 
-브라우저에서 `http://127.0.0.1:8080`을 연다.
-
-운영 GCE에는 호스트 Nginx가 `broker.mjsec.kr`의 일반 HTTPS와
-`agents.mjsec.kr`의 Agent mTLS를 종료한다. Docker의 loopback bind는 유지하며
-Public IP나 `0.0.0.0`으로 변경하지 않는다. Gateway 설정과 Agent 인증서 절차는
-다음 문서에 있다.
-
-- `deploy/nginx/msg-broker.conf`
-- `deploy/mtls/README.md`
-
-## Node Agent Bootstrap
-
-Ubuntu AMD64/ARM64 대상 VM의 운영동형 설치는
-`deploy/bootstrap/node-agent-bootstrap.sh`를 사용한다. 공통 Bootstrap은 지정
-버전 k3s 설치, VM-local CSR/1회용 token enrollment, Node annotation, digest
-고정 Agent DaemonSet rollout과 실제 Broker 전달 확인까지 수행한다.
-
-2026-08-10 깨끗한 GCP VM의 수동 Canary에서 최종
-`BOOTSTRAP_STATUS=ready`를 확인했다. 이는 공통 package 검증 완료를 뜻하며,
-Provider 관리면을 통한 약 100대 검증이 완료됐다는 뜻은 아니다. GCP VM
-Manager/OS Config와 AWS Systems Manager adapter는 구현됐으며 실제 Canary 검증은
-각 Provider에서 별도로 수행해야 한다.
-
-전체 bundle/API/실행 계약은 `deploy/bootstrap/README.md`를 참고한다. 운영에서는
-개인 SSH/SCP로 VM마다 token과 bundle을 전달하지 않는다.
-
-## AWS Provider
-
-AWS는 계정 하나당 Provider Account 하나를 등록하고, 명시한 Region을
-`provider_scope_id`로 사용한다. 중앙 federation Hub Role이 서로 독립적으로
-소유된 AWS 계정의 고정 이름 Role을 계정별 External ID와 함께 Assume한다.
-
-- 인증: GCP metadata Google OIDC → STS `AssumeRoleWithWebIdentity` → STS
-  `AssumeRole`
-- 조회: EC2 instances, instance types, attached EBS volumes
-- Storage: 연결된 EBS 합계이며 instance store는 제외
-- 부분 실패: 성공한 Region만 갱신하고 실패 Region의 마지막 정상 snapshot은 보존
-- Bootstrap: 별도 `MsgBrokerBootstrapRole`로 opt-in tag가 붙은 Ubuntu
-  AMD64/ARM64 EC2에만 SSM Run Command 실행
-- 인증서 발급: IMDSv2 EC2 instance identity RSA 서명을 검증하고 account,
-  Region, instance ID를 resource target과 일치시킴
-
-CloudFormation 템플릿과 AWS Console 적용 순서는
-`deploy/aws/README.md`를 참고한다. 고객 계정을 Organizations에 초대하거나
-AWS Access Key를 전달받지 않는다.
-
-## Azure Provider
-
-Azure는 Tenant별 Entra App Registration 또는 사용자 할당 관리 ID를 사용한다.
-관리 ID는 리소스 그룹 Reader 권한으로 지정한 그룹만 조회할 수 있다.
-
-- 인증: GCP metadata Google OIDC → Entra Federated Credential → Azure 임시 토큰
-- audience: `api://AzureADTokenExchange`
-- 조회 권한: Entra 앱은 각 Subscription의 `Reader`, 관리 ID는 지정한 각
-  Resource Group의 `Reader`
-- 저장 설정: Tenant ID, Client ID, Subscription ID 및 관리 ID 방식의
-  Resource Group 이름만 저장
-- 금지: Azure Client Secret을 `.env`, DB, 이미지에 저장하지 않음
-- Bootstrap: 대상 Resource Group의 제한된 Managed Run Command 권한과
-  `msg-broker-bootstrap=enabled` tag 사용
-
-Entra 앱 연동 계정은 Verify/Sync에서 Google OIDC를 사용한다. 사용자 로그인 계정은
-토큰 만료 후 재연결이 필요하다. 관리 ID로 전환할 때는 기존 계정을 삭제하지 말고
-[설정 절차](docs/AZURE_MANAGED_IDENTITY.md)를 따른다.
-
-## 로컬 개발 실행
-
-Cloud 인증이 필요 없는 개발:
-
-```powershell
-docker compose -f compose.yaml -f compose.dev.yaml up -d --build
-```
-
-로컬 GCP ADC까지 사용하는 개발:
-
-```powershell
-docker compose -f compose.yaml -f compose.dev.yaml -f compose.gcp-local.yaml up -d --build
-```
-
-상태와 로그:
-
-```powershell
-docker compose -f compose.yaml -f compose.dev.yaml ps
-docker compose -f compose.yaml -f compose.dev.yaml logs --tail=200 app frontend
-```
-
-DB volume을 보존하면서 종료:
-
-```powershell
-docker compose -f compose.yaml -f compose.dev.yaml down
-```
-
-`down -v`는 PostgreSQL 데이터를 삭제하므로 명시적인 초기화 때만 사용한다.
+<p align="center"><sub><a href="https://github.com/MSG-CTF/msg-ctf.github.io/blob/67e93a09ce630910f98ae56fb118ca1317af78e0/docs/tech-icons.md">아이콘 출처</a></sub></p>

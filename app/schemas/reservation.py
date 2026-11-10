@@ -50,6 +50,7 @@ class ReservationMutationRequest(ApiSchema):
 class ReservationCommitRequest(ReservationMutationRequest):
     runtime_workload_id: NonEmptyString
     resource_profile: ResourceProfile
+    startup_cpu_millicores: int | None = Field(default=None, gt=0, strict=True)
 
 
 class ReservationReleaseRequest(ReservationMutationRequest):
