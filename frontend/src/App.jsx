@@ -28,7 +28,7 @@ import {
   verifyProviderAccount,
 } from "./api/providerAccounts.js";
 
-const CANDIDATE_OBSERVATION_STALE_MS = 10 * 60 * 1000;
+const CANDIDATE_OBSERVATION_STALE_MS = 15 * 60 * 1000;
 const KOTH_PROJECT_IDS = new Set([
   "msg-60242078", "msg-60222143", "msg-60222538",
   "msg-60232359-3", "msg-60232359-4", "msg-60232359-5",
@@ -2026,8 +2026,8 @@ function AdminDashboard({ onLogout }) {
     }
   }, [refreshGcpCredits]);
 
-  const loadResources = useCallback(async ({ signal } = {}) => {
-    setResourceLoading(true);
+  const loadResources = useCallback(async ({ signal, silent = false } = {}) => {
+    if (!silent) setResourceLoading(true);
     try {
       const response = await listResourceTargets({
         provider: resourceProvider,
@@ -2042,7 +2042,7 @@ function AdminDashboard({ onLogout }) {
       setConnected(false);
       setError(requestError);
     } finally {
-      if (!signal?.aborted) setResourceLoading(false);
+      if (!signal?.aborted && !silent) setResourceLoading(false);
     }
   }, [resourceProvider, resourceAccountId]);
 
@@ -2065,8 +2065,17 @@ function AdminDashboard({ onLogout }) {
   useEffect(() => {
     const controller = new AbortController();
     loadResources({ signal: controller.signal });
-    return () => controller.abort();
-  }, [loadResources]);
+    const intervalId = activeView === "resources"
+      ? window.setInterval(
+        () => loadResources({ signal: controller.signal, silent: true }),
+        60_000,
+      )
+      : null;
+    return () => {
+      if (intervalId !== null) window.clearInterval(intervalId);
+      controller.abort();
+    };
+  }, [activeView, loadResources]);
 
   useEffect(() => {
     if (activeView !== "azure-windows" && activeView !== "resources") return undefined;

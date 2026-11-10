@@ -32,7 +32,7 @@ class SchedulerSettings:
         return cls(
             observation_stale_seconds=_positive_int(
                 "SCHEDULER_OBSERVATION_STALE_SECONDS",
-                600,
+                900,
             ),
             candidate_validity_seconds=_positive_int(
                 "SCHEDULER_CANDIDATE_VALIDITY_SECONDS",
