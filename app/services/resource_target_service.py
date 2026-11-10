@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import os
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.db.tables import ResourceTargetTable, RuntimeContainerTable
 from app.domain.enums import Provider
+from app.domain.koth import KOTH_GCP_PROJECT_IDS
 from app.domain.observation import OBSERVATION_CLOCK_SKEW
 from app.domain.provider_state import RUNNING_PROVIDER_INSTANCE_STATE
 from app.repositories.provider_accounts import ResourceTargetRepository
@@ -34,6 +36,19 @@ class ResourceTargetNotEligibleError(ValueError):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+def allows_manual_candidate_registration(resource: ResourceTargetTable) -> bool:
+    project_ids = {
+        value.strip()
+        for value in os.getenv("CANDIDATE_MANUAL_GCP_PROJECT_IDS", "").split(",")
+        if value.strip()
+    }
+    return (
+        resource.account.provider is Provider.GCP
+        and resource.provider_scope_id not in KOTH_GCP_PROJECT_IDS
+        and resource.provider_scope_id in project_ids
+    )
 
 
 class ResourceTargetService:
@@ -105,6 +120,11 @@ class ResourceTargetService:
         self,
         resource: ResourceTargetTable,
     ) -> None:
+        if resource.provider_scope_id in KOTH_GCP_PROJECT_IDS:
+            raise self._registration_error(
+                "KOTH_VM_EXCLUDED",
+                "KOTH VMs cannot be registered as Scheduler candidates.",
+            )
         if not resource.account.enabled:
             raise self._registration_error(
                 "PROVIDER_ACCOUNT_DISABLED",
@@ -120,6 +140,11 @@ class ResourceTargetService:
                 "PROVIDER_INSTANCE_NOT_RUNNING",
                 "The latest Provider snapshot does not confirm a running VM.",
             )
+        if allows_manual_candidate_registration(resource):
+            return
+        # Windows registration is operator-owned; Runtime readiness is checked separately.
+        if resource.account.provider is Provider.AZURE and resource.os_type == "WINDOWS":
+            return
         if not resource.ready:
             raise self._registration_error(
                 "RUNTIME_NOT_READY",

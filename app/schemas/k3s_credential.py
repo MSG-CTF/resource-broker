@@ -42,6 +42,7 @@ class K3sCredentialUploadResponse(ApiSchema):
 class RuntimeK3sCredentialResponse(ApiSchema):
     schema_version: Literal[1] = 1
     resource_target_id: UUID
+    target_id: str | None = Field(min_length=1)
     source_bootstrap_job_id: UUID
     server_url: str
     kubeconfig_base64: str

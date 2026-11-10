@@ -11,6 +11,7 @@ from app.db.tables import (
     ResourceTargetTable,
 )
 from app.domain.enums import Architecture, ReservationStatus
+from app.domain.koth import KOTH_GCP_PROJECT_IDS
 from app.domain.observation import OBSERVATION_CLOCK_SKEW
 from app.domain.provider_state import RUNNING_PROVIDER_INSTANCE_STATE
 
@@ -40,6 +41,10 @@ class CandidateRepository:
             .where(
                 ProviderAccountTable.enabled.is_(True),
                 ResourceTargetTable.enabled.is_(True),
+                or_(
+                    ResourceTargetTable.provider_scope_id.is_(None),
+                    ResourceTargetTable.provider_scope_id.not_in(KOTH_GCP_PROJECT_IDS),
+                ),
                 ResourceTargetTable.ready.is_(True),
                 ResourceTargetTable.retired_at.is_(None),
                 ResourceTargetTable.provider_instance_state

@@ -16,7 +16,7 @@ Content-Type: application/json
 ```json
 {
   "action": "INSTALL",
-  "bootstrap_version": "0.4.3",
+  "bootstrap_version": "0.4.5",
   "k3s_version": "v1.36.4+k3s1",
   "agent_image": "repository/agent@sha256:<64-hex-digest>"
 }
@@ -123,7 +123,7 @@ ready Azure Linux Agent and outbound HTTPS connectivity.
 
 ## Artifact versions
 
-The Docker image builds Bootstrap `0.4.3` by default. Set the Docker build arg
+The Docker image builds Bootstrap `0.4.5` by default. Set the Docker build arg
 `BOOTSTRAP_VERSION` to publish another immutable bundle. The UI/API version must
 match an artifact present in `BOOTSTRAP_ARTIFACT_DIR`; otherwise job creation
 fails before any provider-side change.

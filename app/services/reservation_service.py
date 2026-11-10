@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.tables import ReservationTable, ResourceTargetTable
 from app.domain.enums import Architecture, ReleaseReason, ReservationStatus
+from app.domain.koth import KOTH_GCP_PROJECT_IDS
 from app.domain.observation import OBSERVATION_CLOCK_SKEW
 from app.domain.provider_state import RUNNING_PROVIDER_INSTANCE_STATE
 from app.repositories.reservations import ReservationRepository
@@ -397,6 +398,7 @@ class ReservationService:
         )
         if (
             not resource.account.enabled
+            or resource.provider_scope_id in KOTH_GCP_PROJECT_IDS
             or not resource.enabled
             or not resource.ready
             or resource.retired_at is not None

@@ -7,6 +7,12 @@ from app.domain.enums import Architecture
 
 
 class AzureVirtualMachinesOperations(Protocol):
+    def list(self, resource_group_name: str) -> Iterable[Any]:
+        raise NotImplementedError
+
+    def get(self, resource_group_name: str, vm_name: str, *, expand: str) -> Any:
+        raise NotImplementedError
+
     def list_all(
         self,
         *,
@@ -94,9 +100,7 @@ class AzureSubscriptionNotFoundError(AzurePermissionError):
 
 class AzureResourceNotFoundError(AzureAdapterError):
     error_code = "AZURE_RESOURCE_NOT_FOUND"
-    public_message = (
-        "An Azure VM network resource was not found while collecting VM details."
-    )
+    public_message = "An Azure resource was not found while collecting VM details."
 
 
 class AzureApiUnavailableError(AzureAdapterError):
@@ -382,6 +386,7 @@ class AzureAdapter:
         subscription_id: str,
         compute_client: AzureComputeClient,
         network_client: AzureNetworkClient,
+        resource_groups: tuple[str, ...] | None = None,
     ) -> None:
         self._subscription_id = _require_non_empty_string(
             "subscription_id",
@@ -389,6 +394,7 @@ class AzureAdapter:
         )
         self._compute_client = compute_client
         self._network_client = network_client
+        self._resource_groups = resource_groups
         self._sku_cache: dict[
             tuple[str, str],
             tuple[int | None, int | None, Architecture | None],
@@ -402,6 +408,8 @@ class AzureAdapter:
         client_id: str,
         subscription_id: str,
         id_token_provider: GoogleIdTokenProvider = google_metadata_id_token,
+        *,
+        resource_groups: tuple[str, ...] | None = None,
     ) -> "AzureAdapter":
         normalized_subscription_id = _require_non_empty_string(
             "subscription_id",
@@ -429,6 +437,7 @@ class AzureAdapter:
                     credential=credential,
                     subscription_id=normalized_subscription_id,
                 ),
+                resource_groups=resource_groups,
             )
         except AzureAdapterError:
             raise
@@ -437,6 +446,13 @@ class AzureAdapter:
                 normalized_subscription_id,
                 error,
             ) from error
+
+    def _resource_group_virtual_machines(self) -> Iterable[Any]:
+        for name in self._resource_groups or ():
+            for vm in self._compute_client.virtual_machines.list(name):
+                yield self._compute_client.virtual_machines.get(
+                    name, vm.name, expand="instanceView"
+                )
 
     def _load_skus_for_location(self, location: str) -> None:
         normalized_location = location.lower()
@@ -488,7 +504,14 @@ class AzureAdapter:
         location: str,
         machine_type: str,
     ) -> tuple[int | None, int | None, Architecture | None]:
-        self._load_skus_for_location(location)
+        try:
+            self._load_skus_for_location(location)
+        except Exception as error:
+            if self._resource_groups is None or not isinstance(
+                _translate_azure_error(self._subscription_id, error), AzurePermissionError
+            ):
+                raise
+            self._loaded_sku_locations.add(location.lower())
         return self._sku_cache.get(
             (location.lower(), machine_type.lower()),
             (None, None, None),
@@ -558,21 +581,32 @@ class AzureAdapter:
         summaries: list[ProviderInstanceSummary] = []
 
         try:
-            status_by_vm_key = {
-                key: vm
-                for vm in self._compute_client.virtual_machines.list_all(
-                    status_only="true"
-                )
-                if (key := _vm_lookup_key(vm)) is not None
-            }
-            virtual_machines = self._compute_client.virtual_machines.list_all()
+            if self._resource_groups is not None:
+                status_by_vm_key = {}
+                virtual_machines = self._resource_group_virtual_machines()
+            else:
+                status_by_vm_key = {
+                    key: vm
+                    for vm in self._compute_client.virtual_machines.list_all(status_only="true")
+                    if (key := _vm_lookup_key(vm)) is not None
+                }
+                virtual_machines = self._compute_client.virtual_machines.list_all()
             for vm in virtual_machines:
-                internal_ip, external_ip = self._ip_addresses(vm)
+                try:
+                    internal_ip, external_ip = self._ip_addresses(vm)
+                except Exception as error:
+                    if self._resource_groups is None or not isinstance(
+                        _translate_azure_error(self._subscription_id, error), AzurePermissionError
+                    ):
+                        raise
+                    internal_ip, external_ip = None, None
                 location = _require_non_empty_string(
                     "vm.location",
                     getattr(vm, "location", None),
                 )
                 machine_type = _machine_type(vm)
+                os_disk = getattr(getattr(vm, "storage_profile", None), "os_disk", None)
+                os_type = (getattr(os_disk, "os_type", None) or "").upper()
                 status_vm = status_by_vm_key.get(_vm_lookup_key(vm), vm)
                 (
                     capacity_cpu_millicores,
@@ -600,6 +634,7 @@ class AzureAdapter:
                         internal_ip=internal_ip,
                         external_ip=external_ip,
                         architecture=architecture,
+                        os_type=os_type if os_type in {"WINDOWS", "LINUX"} else None,
                         provider_capacity_cpu_millicores=(
                             capacity_cpu_millicores
                         ),

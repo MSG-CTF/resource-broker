@@ -259,6 +259,7 @@ class ResourceTargetRepository:
                     instance_name=instance.name,
                     provider_instance_state=instance.status,
                     provider_machine_type=instance.machine_type,
+                    os_type=instance.os_type,
                     private_ip=instance.internal_ip,
                     public_ip=instance.external_ip,
                     region=instance.region,
@@ -282,6 +283,7 @@ class ResourceTargetRepository:
                 resource.instance_name = instance.name
                 resource.provider_instance_state = instance.status
                 resource.provider_machine_type = instance.machine_type
+                resource.os_type = instance.os_type
                 resource.private_ip = instance.internal_ip
                 resource.public_ip = instance.external_ip
                 resource.region = instance.region

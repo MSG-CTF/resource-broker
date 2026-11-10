@@ -20,7 +20,7 @@ import jwt
 from sqlalchemy.orm import Session
 
 from app.db.tables import BootstrapJobTable, K3sCredentialTable
-from app.domain.enums import BootstrapAction, BootstrapJobStatus
+from app.domain.enums import BootstrapAction, BootstrapJobStatus, RuntimeType
 from app.repositories.k3s_credentials import K3sCredentialRepository
 
 
@@ -93,6 +93,7 @@ class BootstrapK3sCredentialUpload:
 @dataclass(frozen=True, slots=True)
 class DecryptedK3sCredential:
     resource_target_id: UUID
+    target_id: str | None
     source_job_id: UUID
     server_url: str
     kubeconfig_base64: str
@@ -508,6 +509,11 @@ class K3sCredentialService:
             raise K3sCredentialDecryptionError
         return DecryptedK3sCredential(
             resource_target_id=credential.resource_target_id,
+            target_id=(
+                credential.resource_target.target_id or None
+                if credential.resource_target.runtime_type is RuntimeType.KUBERNETES
+                else None
+            ),
             source_job_id=credential.source_job_id,
             server_url=credential.server_url,
             kubeconfig_base64=base64.b64encode(kubeconfig).decode("ascii"),

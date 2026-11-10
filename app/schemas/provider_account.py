@@ -145,6 +145,30 @@ class GcpCreditTrackingConfig(GcpCreditTrackingUpdateRequest):
     baseline_at: datetime
 
 
+class GcpCreditObservationUpdateRequest(ApiSchema):
+    amount: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=32, strict=True),
+    ]
+
+    @field_validator("amount")
+    @classmethod
+    def require_display_amount(cls, value: str) -> str:
+        if not value.isprintable() or not any("0" <= char <= "9" for char in value):
+            raise ValueError("amount must be printable and contain a digit")
+        return value
+
+
+class GcpCreditObservationResponse(ApiSchema):
+    billing_account_id: GcpBillingAccountId
+    amount: str
+    observed_at: datetime
+
+
+class GcpCreditObservationListResponse(ApiSchema):
+    items: list[GcpCreditObservationResponse]
+
+
 class GcpAccountCreateConfig(ApiSchema):
     project_ids: list[ProviderIdentifier] = Field(min_length=1)
 
@@ -173,20 +197,78 @@ class AwsAccountConfig(AwsAccountCreateConfig):
     external_id: AwsExternalId
 
 
+class AzureResourceGroupScope(ApiSchema):
+    subscription_id: AzureUuid
+    name: str = Field(min_length=1, max_length=90)
+
+    @field_validator("name")
+    @classmethod
+    def valid_name(cls, value: str) -> str:
+        if value.endswith(".") or any(
+            not (character.isalnum() or character in "_-.()")
+            for character in value
+        ):
+            raise ValueError("Invalid Azure resource group name.")
+        return value
+
+
 class AzureAccountConfig(ApiSchema):
-    client_id: AzureUuid
+    # Legacy login values remain readable so existing accounts can be converted.
+    auth_method: Literal["GOOGLE_OIDC_CLIENT_ASSERTION", "USER_BROWSER", "USER_DEVICE_CODE"] = (
+        "GOOGLE_OIDC_CLIENT_ASSERTION"
+    )
+    client_id: AzureUuid | None = None
     subscription_ids: list[AzureUuid] = Field(min_length=1)
+    resource_groups: list[AzureResourceGroupScope] | None = None
 
     @field_validator("client_id")
     @classmethod
-    def normalize_client_id(cls, value: str) -> str:
-        return value.lower()
+    def normalize_client_id(cls, value: str | None) -> str | None:
+        return value.lower() if value is not None else None
+
+    @model_validator(mode="after")
+    def require_federated_client_id(self) -> "AzureAccountConfig":
+        if self.auth_method == "GOOGLE_OIDC_CLIENT_ASSERTION" and not self.client_id:
+            raise ValueError("Client ID is required for federated authentication.")
+        if self.resource_groups is not None:
+            if self.auth_method != "GOOGLE_OIDC_CLIENT_ASSERTION" or not self.resource_groups:
+                raise ValueError("Resource groups require federated authentication.")
+            subscriptions = {value.lower() for value in self.subscription_ids}
+            configured = {scope.subscription_id.lower() for scope in self.resource_groups}
+            pairs = {
+                (scope.subscription_id.lower(), scope.name.lower())
+                for scope in self.resource_groups
+            }
+            if subscriptions != configured or len(pairs) != len(self.resource_groups):
+                raise ValueError("Resource groups must be unique and match the subscriptions.")
+        return self
 
     @field_validator("subscription_ids")
     @classmethod
     def require_unique_subscriptions(cls, value: list[str]) -> list[str]:
         normalized = [subscription_id.lower() for subscription_id in value]
         return _require_unique_values("subscription_ids", normalized)
+
+
+class AzureFederatedAccountConfig(AzureAccountConfig):
+    auth_method: Literal["GOOGLE_OIDC_CLIENT_ASSERTION"] = "GOOGLE_OIDC_CLIENT_ASSERTION"
+
+
+class AzureManagedIdentityRequest(ApiSchema):
+    client_id: AzureUuid
+    resource_groups: list[AzureResourceGroupScope] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "AzureManagedIdentityRequest":
+        subscription_ids = list(dict.fromkeys(
+            scope.subscription_id.lower() for scope in self.resource_groups
+        ))
+        AzureAccountConfig(
+            client_id=self.client_id,
+            subscription_ids=subscription_ids,
+            resource_groups=self.resource_groups,
+        )
+        return self
 
 
 class ProviderAccountCreateBase(ApiSchema):
@@ -227,7 +309,7 @@ class AwsAccountCreateRequest(ProviderAccountCreateBase):
 class AzureAccountCreateRequest(ProviderAccountCreateBase):
     provider: Literal[Provider.AZURE]
     external_account_id: AzureUuid
-    config: AzureAccountConfig
+    config: AzureFederatedAccountConfig
 
     @field_validator("external_account_id")
     @classmethod

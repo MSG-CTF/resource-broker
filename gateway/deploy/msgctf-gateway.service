@@ -1,0 +1,20 @@
+[Unit]
+Description=MSGCTF Gateway management API
+After=network.target nginx.service
+Requires=nginx.service
+
+[Service]
+Type=exec
+User=msgctf-gateway
+Group=msgctf-gateway
+WorkingDirectory=/opt/msgctf-gateway
+EnvironmentFile=/etc/msgctf-gateway/runtime.env
+ExecStart=/opt/msgctf-gateway/venv/bin/uvicorn gateway.main:app --host 127.0.0.1 --port 8090 --workers 1 --no-proxy-headers --no-access-log
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=70
+UMask=0077
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -59,7 +59,7 @@ from app.repositories.reservations import ReservationRepository
 GcpAdapterFactory = Callable[[str], GcpAdapter]
 AwsFederationFactory = Callable[[str, str, str], AwsFederation]
 AwsAdapterFactory = Callable[[str, AwsTemporaryCredentials], AwsAdapter]
-AzureAdapterFactory = Callable[[str, str, str], AzureAdapter]
+AzureAdapterFactory = Callable[..., AzureAdapter]
 AwsSettingProvider = Callable[[], str | None]
 
 
@@ -193,6 +193,10 @@ class ProviderAccountService:
         provider_config: dict[str, Any],
         enabled: bool,
     ) -> ProviderAccountTable:
+        if provider is Provider.AZURE and self._azure_subscription_conflict(
+            external_account_id, provider_config.get("subscription_ids", ()),
+        ):
+            raise DuplicateProviderAccountError
         auth_method = {
             Provider.GCP: "ADC",
             Provider.AWS: "GOOGLE_OIDC_STS",
@@ -222,6 +226,95 @@ class ProviderAccountService:
 
     def list_accounts(self) -> tuple[ProviderAccountTable, ...]:
         return self._accounts.list_all()
+
+    def _azure_subscription_conflict(
+        self, tenant_id: str, subscription_ids: tuple[str, ...] | list[str], *, exclude_account_id: UUID | None = None,
+    ) -> bool:
+        requested = {subscription_id.lower() for subscription_id in subscription_ids}
+        # shortcut: service-level scope checks can race; use a scope table if concurrent Azure account writes are needed.
+        return any(
+            account.provider is Provider.AZURE
+            and account.external_account_id.lower() == tenant_id.lower()
+            and account.account_id != exclude_account_id
+            and requested.intersection(
+                subscription_id.lower()
+                for subscription_id in (account.provider_config or {}).get("subscription_ids", ())
+                if isinstance(subscription_id, str)
+            )
+            for account in self._accounts.list_all()
+        )
+
+    def configure_azure_managed_identity(
+        self,
+        account_id: UUID,
+        *,
+        client_id: str,
+        resource_groups: list[dict[str, str]],
+    ) -> SyncOutcome:
+        account = self._get_account(account_id)
+        if account.provider is not Provider.AZURE:
+            raise InvalidProviderAccountConfigError("This account is not Azure.")
+        if not resource_groups:
+            raise InvalidProviderAccountConfigError("At least one Azure resource group is required.")
+        if self._bootstrap_jobs.has_active_for_account(account_id):
+            raise ProviderAccountHasActiveBootstrapJobsError
+        if self._reservations.has_active_for_account(account_id):
+            raise ProviderAccountHasActiveReservationsError
+
+        subscription_ids = tuple(
+            dict.fromkeys(group["subscription_id"].lower() for group in resource_groups)
+        )
+        if self._azure_subscription_conflict(
+            account.external_account_id, subscription_ids, exclude_account_id=account_id,
+        ):
+            raise InvalidProviderAccountConfigError("An Azure subscription is already assigned to another account.")
+        previous_subscription_ids = self._subscription_ids(account)
+        config = {
+            "auth_method": "GOOGLE_OIDC_CLIENT_ASSERTION",
+            "client_id": client_id.lower(),
+            "subscription_ids": list(subscription_ids),
+            "resource_groups": resource_groups,
+        }
+        synced_at = datetime.now(UTC)
+        inspections, instances = self._inspect_subscriptions(
+            account, subscription_ids, provider_config=config,
+        )
+        if not all(item.success for item in inspections):
+            return SyncOutcome(
+                account=account,
+                synced_at=synced_at,
+                success=False,
+                discovered_count=len(instances),
+                created_count=0,
+                updated_count=0,
+                retired_count=0,
+                scopes=inspections,
+                resources=(),
+            )
+
+        account.provider_config = config
+        account.auth_method = "GOOGLE_OIDC_CLIENT_ASSERTION"
+        account.credential_reference = "federated://gcp-attached-service-account"
+        self._apply_account_status(account, inspections)
+        account.last_verified_at = synced_at
+        sync_result = self._resources.sync_instances(
+            account_id=account_id,
+            scope_ids=tuple(
+                dict.fromkeys((*previous_subscription_ids, *subscription_ids))
+            ),
+            instances=instances,
+            observed_at=synced_at,
+        )
+        account.last_synced_at = synced_at
+        self._session.commit()
+        self._session.refresh(account)
+        return self._successful_sync_outcome(
+            account=account,
+            synced_at=synced_at,
+            inspections=inspections,
+            instances=instances,
+            sync_result=sync_result,
+        )
 
     def verify(self, account_id: UUID) -> VerificationOutcome:
         account = self._get_account(account_id)
@@ -483,8 +576,8 @@ class ProviderAccountService:
         return tuple(raw_project_ids)
 
     @staticmethod
-    def _azure_client_id(account: ProviderAccountTable) -> str:
-        client_id = account.provider_config.get("client_id")
+    def _azure_client_id(config: dict[str, Any]) -> str:
+        client_id = config.get("client_id")
         if (
             not isinstance(client_id, str)
             or not client_id
@@ -705,26 +798,57 @@ class ProviderAccountService:
         self,
         account: ProviderAccountTable,
         subscription_ids: tuple[str, ...],
+        *,
+        provider_config: dict[str, Any] | None = None,
     ) -> tuple[
         tuple[ProviderScopeInspection, ...],
         tuple[ProviderInstanceSummary, ...],
     ]:
         tenant_id = account.external_account_id
-        client_id = self._azure_client_id(account)
-        account.auth_method = "GOOGLE_OIDC_CLIENT_ASSERTION"
-        account.credential_reference = (
-            "federated://gcp-attached-service-account"
-        )
+        config = provider_config if provider_config is not None else account.provider_config
+        if config.get("auth_method") in ("USER_BROWSER", "USER_DEVICE_CODE"):
+            raise InvalidProviderAccountConfigError(
+                "Switch this Azure account to managed identity federation."
+            )
+        client_id = self._azure_client_id(config)
+        if provider_config is None:
+            account.auth_method = "GOOGLE_OIDC_CLIENT_ASSERTION"
+            account.credential_reference = "federated://gcp-attached-service-account"
+        raw_groups = config.get("resource_groups")
+        if raw_groups is not None and (
+            not isinstance(raw_groups, list)
+            or not raw_groups
+            or any(
+                not isinstance(group, dict)
+                or not isinstance(group.get("subscription_id"), str)
+                or not isinstance(group.get("name"), str)
+                for group in raw_groups
+            )
+        ):
+            raise InvalidProviderAccountConfigError("The Azure resource groups are invalid.")
         inspections: list[ProviderScopeInspection] = []
         instances: list[ProviderInstanceSummary] = []
 
         for subscription_id in subscription_ids:
             try:
-                subscription_instances = self._azure_adapter_factory(
-                    tenant_id,
-                    client_id,
-                    subscription_id,
-                ).list_instances()
+                if raw_groups is None:
+                    adapter = self._azure_adapter_factory(
+                        tenant_id, client_id, subscription_id,
+                    )
+                else:
+                    groups = tuple(
+                        group["name"] for group in raw_groups
+                        if group["subscription_id"].lower() == subscription_id.lower()
+                    )
+                    if not groups:
+                        raise InvalidProviderAccountConfigError(
+                            "Every Azure subscription needs a resource group."
+                        )
+                    adapter = self._azure_adapter_factory(
+                        tenant_id, client_id, subscription_id,
+                        resource_groups=groups,
+                    )
+                subscription_instances = adapter.list_instances()
             except AzureAdapterError as error:
                 inspections.append(
                     ProviderScopeInspection(

@@ -48,7 +48,7 @@ jobs:
           DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
         run: |
           python -m alembic upgrade head
-          python -m alembic downgrade 20261020_0001
+          python -m alembic downgrade 20261027_0015
           python -m alembic upgrade head
       - name: Build deployable broker image
         run: docker build --label org.opencontainers.image.revision=${{ github.sha }} --tag msg-resource-broker:ci .

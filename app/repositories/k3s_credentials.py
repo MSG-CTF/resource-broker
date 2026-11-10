@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.tables import K3sCredentialTable, ResourceTargetTable
 
@@ -17,11 +17,14 @@ class K3sCredentialRepository:
         for_update: bool = False,
         runtime_visible_only: bool = False,
     ) -> K3sCredentialTable | None:
-        statement = select(K3sCredentialTable).where(
-            K3sCredentialTable.resource_target_id == resource_target_id
+        statement = (
+            select(K3sCredentialTable)
+            .where(K3sCredentialTable.resource_target_id == resource_target_id)
         )
         if runtime_visible_only:
-            statement = statement.join(ResourceTargetTable).where(
+            statement = statement.options(
+                joinedload(K3sCredentialTable.resource_target)
+            ).join(ResourceTargetTable).where(
                 ResourceTargetTable.enabled.is_(True),
                 ResourceTargetTable.retired_at.is_(None),
             )
@@ -41,6 +44,7 @@ class K3sCredentialRepository:
     ) -> tuple[K3sCredentialTable, ...]:
         statement = (
             select(K3sCredentialTable)
+            .options(joinedload(K3sCredentialTable.resource_target))
             .join(ResourceTargetTable)
             .where(
                 ResourceTargetTable.enabled.is_(True),

@@ -359,7 +359,11 @@ class BootstrapJobService:
             if resource.provider_scope_id is None:
                 raise BootstrapResourceTargetInvalidError
         elif provider is Provider.AZURE:
-            if resource.provider_scope_id is None or resource.region is None:
+            if (
+                resource.provider_scope_id is None
+                or resource.region is None
+                or resource.account.provider_config.get("resource_groups") is not None
+            ):
                 raise BootstrapResourceTargetInvalidError
 
     @staticmethod

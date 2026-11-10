@@ -28,9 +28,10 @@ variable "problem_vms_running" {
 variable "projects" {
   description = "GCP projects keyed by project ID, with their existing Billing account and VM region/zone."
   type = map(object({
-    billing_account_id = string
-    region             = string
-    zone               = string
+    billing_account_id  = string
+    region              = string
+    zone                = string
+    problem_vms_running = optional(bool)
   }))
   nullable = false
 

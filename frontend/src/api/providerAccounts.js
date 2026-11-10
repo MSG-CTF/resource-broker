@@ -74,22 +74,27 @@ export function listProviderAccounts() {
   return request("/v1/admin/provider-accounts");
 }
 
-export function listWindowsWorkerPools({ signal } = {}) {
-  return request("/v1/admin/windows-worker-pools", { signal });
+export function listGcpCreditObservations() {
+  return request("/v1/admin/gcp-credit-observations");
 }
 
-export function createWindowsWorkerPool(payload) {
-  return request("/v1/admin/windows-worker-pools", {
-    method: "POST",
-    body: JSON.stringify(payload),
+export function saveGcpCreditObservation(billingAccountId, amount) {
+  return request(`/v1/admin/gcp-credit-observations/${encodeURIComponent(billingAccountId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ amount }),
   });
 }
 
-export function listResourceTargets({ provider = "" } = {}) {
+export function listResourceTargets({ provider = "", accountId = "", signal } = {}) {
   const query = new URLSearchParams();
   if (provider) query.set("provider", provider);
+  if (accountId) query.set("account_id", accountId);
   query.set("limit", "500");
-  return request(`/v1/admin/resource-targets?${query.toString()}`);
+  return request(`/v1/admin/resource-targets?${query.toString()}`, { signal });
+}
+
+export function listWindowsVmStatuses({ signal } = {}) {
+  return request("/v1/admin/windows-vms", { signal });
 }
 
 export function updateResourceTargetCandidateRegistration(
@@ -103,6 +108,18 @@ export function updateResourceTargetCandidateRegistration(
       body: JSON.stringify({ enabled }),
     },
   );
+}
+
+export function setVmPower(resourceTargetId, action) {
+  return request(`/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/power`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
+export function getVmPowerOperation(resourceTargetId, operationName, action) {
+  const query = new URLSearchParams({ action });
+  return request(`/v1/admin/resource-targets/${encodeURIComponent(resourceTargetId)}/power-operations/${encodeURIComponent(operationName)}?${query}`);
 }
 
 export function listResourceTargetContainers(resourceTargetId, { signal } = {}) {
@@ -132,6 +149,13 @@ export function createBootstrapJob(resourceTargetId, payload) {
 export function createProviderAccount(payload) {
   return request("/v1/admin/provider-accounts", {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function configureAzureManagedIdentity(accountId, payload) {
+  return request(`/v1/admin/provider-accounts/${encodeURIComponent(accountId)}/azure-managed-identity`, {
+    method: "PUT",
     body: JSON.stringify(payload),
   });
 }
